@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cascade-guard"
+version = "1.0.0"
+description = "Cascade Detection and Prevention for Multi-Agent Delegation Chains"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Michael Brinkley", email = "michael@scrollld.os"}
+]
+keywords = [
+    "cascade-detection", "multi-agent", "delegation", "union-find",
+    "agentic-ai", "authorization", "flow-control", "impedance"
+]
+
+dependencies = [
+    "pydantic>=2.5.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+]
+
+[project.scripts]
+cascade-guard-demo = "cascade_guard.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
