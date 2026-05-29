@@ -137,3 +137,21 @@ The decision log is append-only and persists independently of CascadeGuard's run
 Each choice follows from the same principle: **the safety layer must be simpler, faster, and more reliable than the system it protects.** If the safety layer is more complex than the system, it will fail first. If it's slower, it will detect failures after the damage is done. If it's less reliable, it will be unavailable when needed most.
 
 CascadeGuard is deliberately minimal — Union-Find, rolling statistics, and a decision log. Nothing more. The minimality is the feature.
+
+
+---
+
+## Governance & Compliance Mapping
+
+CascadeGuard's mathematical theorems map directly to enterprise AI governance frameworks. The proofs are not academic exercises — they are the automated verification code that turns compliance standards into audit-ready realities.
+
+| Technical Anchor | Verification Method | Governance Target | Compliance Mapping |
+|---|---|---|---|
+| Theorem 1 (O(α(N))) | Path compression lock-in | EC-Council CRAGE | ISO 42001 Scalability & Robustness |
+| Theorem 2 (Z Monotonicity) | Fixed-point integer scaling | ISACA AI Audit | Continuous System Monitoring & SOC 2 |
+| Theorem 3 (O(K) Sources) | Pre-allocated map buffers | EXIN AICP | Data Provenance & Bias Origin Tracking |
+| Theorems 4 & 5 (Zero-Error) | Deterministic boundary check | IAPP AIGP | EU AI Act Article 15 (Accuracy Mandate) |
+| Theorem 6 (κ Convergence) | Sliding window reset caps | Heisenberg CAIG | NIST AI RMF "Manage" (Automated Recovery) |
+| 10K-Hop Stress Test | Flat iterative stacks | MIT Responsible AI | Worst-Case Failure Mode Analysis |
+
+For detailed compliance gap analysis and implementation guidance, contact [michael@scrollld.os](mailto:michael@scrollld.os).
