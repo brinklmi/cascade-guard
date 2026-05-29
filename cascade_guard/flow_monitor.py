@@ -172,10 +172,7 @@ class FlowMonitor:
         # Weighted impedance
         w_v, w_d, w_f, w_c = self.weights
         impedance = (
-            w_v * velocity_ratio
-            + w_d * depth_ratio
-            + w_f * fanout_ratio
-            + w_c * concentration
+            w_v * velocity_ratio + w_d * depth_ratio + w_f * fanout_ratio + w_c * concentration
         )
         impedance = min(1.0, max(0.0, impedance))
 

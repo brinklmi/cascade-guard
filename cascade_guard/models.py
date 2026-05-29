@@ -15,18 +15,20 @@ from pydantic import BaseModel, Field
 
 class DelegationAction(str, Enum):
     """Actions that can be delegated between agents."""
-    SPAWN = "spawn"          # Create a new sub-agent
-    DELEGATE = "delegate"    # Pass a task to existing agent
-    ESCALATE = "escalate"    # Request higher authority
-    REVOKE = "revoke"        # Remove a delegation
+
+    SPAWN = "spawn"  # Create a new sub-agent
+    DELEGATE = "delegate"  # Pass a task to existing agent
+    ESCALATE = "escalate"  # Request higher authority
+    REVOKE = "revoke"  # Remove a delegation
 
 
 class FlowState(str, Enum):
     """System flow states based on impedance."""
-    NOMINAL = "nominal"           # Normal operation
-    ELEVATED = "elevated"         # Increased delegation velocity
-    THROTTLED = "throttled"       # Active throttling engaged
-    PRESERVATION = "preservation" # Emergency mode — rejecting delegations
+
+    NOMINAL = "nominal"  # Normal operation
+    ELEVATED = "elevated"  # Increased delegation velocity
+    THROTTLED = "throttled"  # Active throttling engaged
+    PRESERVATION = "preservation"  # Emergency mode — rejecting delegations
 
 
 class AgentNode(BaseModel):
@@ -35,6 +37,7 @@ class AgentNode(BaseModel):
     Maps to a node in the Union-Find forest.
     Tracks delegation depth and spawn metadata.
     """
+
     id: str
     model_id: str = "unknown"
     parent_id: Optional[str] = None
@@ -50,6 +53,7 @@ class AgentNode(BaseModel):
 
 class DelegationAttempt(BaseModel):
     """A request to delegate from one agent to another."""
+
     source_id: str
     target_id: Optional[str] = None  # None = spawn new agent
     action: DelegationAction = DelegationAction.SPAWN
@@ -60,6 +64,7 @@ class DelegationAttempt(BaseModel):
 
 class DelegationVerdict(BaseModel):
     """Result of evaluating a delegation attempt."""
+
     allowed: bool
     source_id: str
     target_id: Optional[str] = None
@@ -80,21 +85,23 @@ class ImpedanceReport(BaseModel):
     - fan_out: average children per agent
     - concentration: how concentrated delegations are (Gini-like)
     """
-    impedance: float = 0.0          # 0.0 = free flow, 1.0 = fully blocked
-    velocity: float = 0.0           # delegations/second
-    mean_depth: float = 0.0         # average chain depth
-    max_depth: int = 0              # deepest chain
-    fan_out: float = 0.0            # average children per parent
-    max_fan_out: int = 0            # widest single parent
-    concentration: float = 0.0     # delegation concentration (0=uniform, 1=single source)
+
+    impedance: float = 0.0  # 0.0 = free flow, 1.0 = fully blocked
+    velocity: float = 0.0  # delegations/second
+    mean_depth: float = 0.0  # average chain depth
+    max_depth: int = 0  # deepest chain
+    fan_out: float = 0.0  # average children per parent
+    max_fan_out: int = 0  # widest single parent
+    concentration: float = 0.0  # delegation concentration (0=uniform, 1=single source)
     flow_state: FlowState = FlowState.NOMINAL
 
 
 class CascadeStatus(BaseModel):
     """Overall system status."""
+
     total_agents: int = 0
     total_delegations: int = 0
-    active_roots: int = 0           # Number of independent delegation trees
+    active_roots: int = 0  # Number of independent delegation trees
     max_depth: int = 0
     max_fan_out: int = 0
     cycles_detected: int = 0

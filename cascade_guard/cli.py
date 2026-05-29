@@ -26,11 +26,13 @@ def main() -> int:
     """Run the CascadeGuard demo scenario."""
     console = Console()
 
-    console.print(Panel.fit(
-        "[bold cyan]CascadeGuard — Cascade Detection & Prevention[/bold cyan]\n"
-        "Union-Find Cycle Detection + Distribution-Based Impedance",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold cyan]CascadeGuard — Cascade Detection & Prevention[/bold cyan]\n"
+            "Union-Find Cycle Detection + Distribution-Based Impedance",
+            border_style="cyan",
+        )
+    )
 
     # Initialize with tight limits for demo visibility
     engine = CascadeEngine(
@@ -96,7 +98,9 @@ def main() -> int:
     console.print("\n  Orchestrator spawns workers (fanout limit = 4)...")
     for i in range(2, 5):  # Already has planner-1, so 3 more to hit limit
         r = engine.register_agent(f"worker-{i}", model_id="worker-v1", parent_id="orch-1")
-        console.print(f"    worker-{i}: {'✓' if r.allowed else '✗'} (fanout={len(engine._agents['orch-1'].children)})")
+        console.print(
+            f"    worker-{i}: {'✓' if r.allowed else '✗'} (fanout={len(engine._agents['orch-1'].children)})"
+        )
 
     console.print("\n  Orchestrator tries 5th child (EXCEEDS fanout limit)...")
     r = engine.register_agent("worker-5", model_id="worker-v1", parent_id="orch-1")
@@ -119,9 +123,13 @@ def main() -> int:
 
     for i in range(1, 12):
         r = engine2.register_agent(f"rapid-{i}", model_id="fast-v1", parent_id="root")
-        state_icon = "🟢" if r.flow_state.value == "nominal" else (
-            "🟡" if r.flow_state.value == "elevated" else (
-                "🟠" if r.flow_state.value == "throttled" else "🔴"
+        state_icon = (
+            "🟢"
+            if r.flow_state.value == "nominal"
+            else (
+                "🟡"
+                if r.flow_state.value == "elevated"
+                else ("🟠" if r.flow_state.value == "throttled" else "🔴")
             )
         )
         status = f"{state_icon} {r.flow_state.value}"
@@ -129,7 +137,9 @@ def main() -> int:
             console.print(f"    rapid-{i}: [red]BLOCKED[/red] | {status} | Z={r.impedance:.3f}")
             break
         else:
-            console.print(f"    rapid-{i}: [green]OK[/green] | {status} | Z={r.impedance:.3f} | v={r.velocity:.1f}/s")
+            console.print(
+                f"    rapid-{i}: [green]OK[/green] | {status} | Z={r.impedance:.3f} | v={r.velocity:.1f}/s"
+            )
 
     # ─── Final Status ────────────────────────────────────────────────────────
     console.print("\n[bold]━━━ System Status ━━━[/bold]")
@@ -143,7 +153,9 @@ def main() -> int:
 def _print_verdict(console: Console, v) -> None:
     """Print a delegation verdict."""
     if v.allowed:
-        console.print(f"    [green]✓ ALLOWED[/green] | {v.reason} | depth={v.depth} | Z={v.impedance:.3f}")
+        console.print(
+            f"    [green]✓ ALLOWED[/green] | {v.reason} | depth={v.depth} | Z={v.impedance:.3f}"
+        )
     else:
         icon = "🔄" if v.cycle_detected else "✗"
         console.print(f"    [red]{icon} BLOCKED[/red] | {v.reason}")
