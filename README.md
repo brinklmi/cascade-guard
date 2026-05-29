@@ -34,6 +34,30 @@ Depth limits don't catch cycles (A→B→C→A is only depth 3). Timeouts are re
 
 A single cascading event drains budgets before a middle-office analyst can open a monitoring dashboard.
 
+### The Recursive Cascade Multiplier
+
+In a runaway recursive loop, total context inflates exponentially. Assuming 4,000 input + 1,000 output tokens per iteration:
+
+| Recursion Depth | Total Tokens | Cached ($0.005/1K) | Standard ($0.03/1K) | Frontier ($0.15/1K) |
+|---|---|---|---|---|
+| Iteration 1 | 5,000 | $0.025 | $0.15 | $0.75 |
+| Iteration 5 | 25,000 | $0.125 | $0.75 | $3.75 |
+| Iteration 20 | 100,000 | $0.50 | $3.00 | $15.00 |
+| Iteration 100 | 500,000 | $2.50 | $15.00 | $75.00 |
+| **Iteration 500 (Runaway)** | **2,500,000** | **$12.50** | **$75.00** | **$375.00** |
+
+**Per agent.** With 5 concurrent agents in a parallel loop, multiply by 5. A $75 single-agent runaway becomes $375 per cluster run — before anyone notices.
+
+**Where CascadeGuard trips the fuse:**
+
+```
+[Loop Start] → [Iteration 5: $0.75] → [Iteration 20: $3.00] → [💥 CascadeGuard Trips]
+                                                                         │
+                              [SAVED: Runaway escalation to $375+] ◄─────┘
+```
+
+Context window inflation and multi-agent concurrency make linear cost projections dangerously optimistic. CascadeGuard's microsecond circuit breaker stops the bleeding at iteration 20, not iteration 500.
+
 ---
 
 ## Computational Complexity

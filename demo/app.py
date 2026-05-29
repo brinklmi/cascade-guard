@@ -300,6 +300,65 @@ if engine.num_agents > 0:
         st.plotly_chart(fig_graph, use_container_width=True)
 
 
+# ─── Cost Calculator ──────────────────────────────────────────────────────────
+
+st.markdown("---")
+st.subheader("💰 Recursive Cascade Cost Calculator")
+st.markdown("See how runaway costs compound — and where CascadeGuard stops the bleeding.")
+
+calc_col1, calc_col2 = st.columns(2)
+
+with calc_col1:
+    token_rate = st.number_input("Token cost ($/1K tokens)", value=0.03, step=0.005, format="%.3f")
+    tokens_per_iteration = st.number_input("Tokens per iteration", value=5000, step=1000)
+    concurrent_agents = st.slider("Concurrent agents in loop", 1, 20, 5)
+    fuse_iteration = st.slider("CascadeGuard trips at iteration", 3, 50, 20)
+
+with calc_col2:
+    max_iterations = 500
+    iterations = list(range(1, max_iterations + 1))
+    costs = [(i * tokens_per_iteration * token_rate / 1000) * concurrent_agents for i in iterations]
+
+    # Cost with CascadeGuard (capped at fuse_iteration)
+    costs_guarded = [(min(i, fuse_iteration) * tokens_per_iteration * token_rate / 1000) * concurrent_agents for i in iterations]
+
+    fig_cost = go.Figure()
+
+    fig_cost.add_trace(go.Scatter(
+        x=iterations, y=costs,
+        mode='lines', name='Without CascadeGuard',
+        line=dict(color='#e63946', width=3),
+    ))
+
+    fig_cost.add_trace(go.Scatter(
+        x=iterations, y=costs_guarded,
+        mode='lines', name='With CascadeGuard',
+        line=dict(color='#2ecc71', width=3),
+    ))
+
+    fig_cost.add_vline(x=fuse_iteration, line_dash="dash", line_color="orange",
+                       annotation_text=f"💥 Fuse trips (iteration {fuse_iteration})")
+
+    saved = costs[-1] - costs_guarded[-1]
+    fig_cost.update_layout(
+        title=f"Saved: ${saved:,.2f} per runaway event",
+        yaxis_title="Cumulative Cost ($)",
+        xaxis_title="Recursion Depth (iterations)",
+        height=350,
+        margin=dict(l=40, r=40, t=60, b=40),
+    )
+
+    st.plotly_chart(fig_cost, use_container_width=True)
+
+st.markdown(f"""
+**At your settings:** {concurrent_agents} agents × {tokens_per_iteration:,} tokens/iteration × ${token_rate}/1K tokens
+
+| Without CascadeGuard (500 iterations) | With CascadeGuard (trips at {fuse_iteration}) | **Saved** |
+|---|---|---|
+| **${costs[-1]:,.2f}** | **${costs_guarded[-1]:,.2f}** | **${saved:,.2f}** |
+""")
+
+
 # ─── Footer ───────────────────────────────────────────────────────────────────
 
 st.markdown("---")
