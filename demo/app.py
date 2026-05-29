@@ -124,7 +124,7 @@ with col1:
         st.session_state.kappa_history.append(engine.get_status().kappa_effective)
 
         if result.allowed:
-            st.success(f"✓ Agent '{agent_id}' registered | depth={result.depth} | κ={result.impedance:.3f}")
+            st.success(f"✓ Agent '{agent_id}' registered | depth={result.depth} | κ={engine.get_status().kappa_effective:.3f}")
         else:
             st.error(f"✗ BLOCKED: {result.reason}")
         st.rerun()
@@ -151,7 +151,7 @@ with col2:
             st.session_state.kappa_history.append(engine.get_status().kappa_effective)
 
             if result.allowed:
-                st.success(f"✓ Delegation {source} → {target} allowed")
+                st.success(f"✓ Delegation {source} → {target} allowed | κ={engine.get_status().kappa_effective:.3f}")
             else:
                 if result.cycle_detected:
                     st.error(f"🔄 CYCLE DETECTED: {source} → {target} would create circular dependency")
