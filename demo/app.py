@@ -188,11 +188,17 @@ with metric_col4:
 if st.session_state.kappa_history:
     st.subheader("📉 κ_effective Over Time")
 
+    # Ensure chart ends at current engine state
+    chart_data = st.session_state.kappa_history.copy()
+    current_kappa = engine.get_status().kappa_effective
+    if chart_data and abs(chart_data[-1] - current_kappa) > 0.01:
+        chart_data.append(current_kappa)
+
     fig = go.Figure()
 
     # κ line
     fig.add_trace(go.Scatter(
-        y=st.session_state.kappa_history,
+        y=chart_data,
         mode='lines+markers',
         name='κ_effective',
         line=dict(color='#3498db', width=3),
