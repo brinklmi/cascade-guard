@@ -4,13 +4,14 @@ Computes impedance from delegation flow statistics rather than vector embeddings
 No pairwise similarity computation needed — just rolling window stats.
 
 Impedance formula:
-    Z = w_v * velocity_ratio + w_d * depth_ratio + w_f * fanout_ratio + w_c * concentration
+    Z = w_v * velocity_ratio + w_d * depth_ratio + w_f * fanout_ratio + w_c * concentration + w_t * token_pressure
 
 Where:
     velocity_ratio = current_velocity / max_velocity
     depth_ratio = max_depth / depth_limit
     fanout_ratio = max_fanout / fanout_limit
     concentration = gini(delegation_counts_per_source)
+    token_pressure = total_tokens_consumed / token_budget (0 if no budget)
 
 κ_effective = κ_duat * (1 - Z)
 
@@ -44,8 +45,13 @@ class FlowMonitor:
         κ_effective below this triggers preservation mode (default 0.3).
     kappa_duat : float
         Base metabolic constant (default 1.0).
-    weights : tuple[float, float, float, float]
-        Weights for (velocity, depth, fanout, concentration). Default (0.4, 0.2, 0.2, 0.2).
+    weights : tuple[float, float, float, float, float]
+        Weights for (velocity, depth, fanout, concentration, token_pressure).
+        Default (0.35, 0.15, 0.15, 0.15, 0.20).
+    token_budget : float or None
+        System-wide token budget. None = unlimited (no token pressure component).
+    cost_per_1k_tokens : float
+        Cost in dollars per 1000 tokens (for cost attribution). Default 0.03.
     """
 
     def __init__(
@@ -56,7 +62,9 @@ class FlowMonitor:
         window_seconds: float = 60.0,
         preservation_threshold: float = 0.3,
         kappa_duat: float = 1.0,
-        weights: tuple[float, float, float, float] = (0.4, 0.2, 0.2, 0.2),
+        weights: tuple = (0.35, 0.15, 0.15, 0.15, 0.20),
+        token_budget: Optional[float] = None,
+        cost_per_1k_tokens: float = 0.03,
     ):
         self.max_velocity = max_velocity
         self.depth_limit = depth_limit
@@ -64,7 +72,13 @@ class FlowMonitor:
         self.window_seconds = window_seconds
         self.preservation_threshold = preservation_threshold
         self.kappa_duat = kappa_duat
-        self.weights = weights
+        # Support both 4-tuple (legacy) and 5-tuple (with token weight)
+        if len(weights) == 4:
+            self.weights = weights + (0.0,)
+        else:
+            self.weights = weights
+        self.token_budget = token_budget
+        self.cost_per_1k_tokens = cost_per_1k_tokens
 
         # Rolling window of delegation timestamps
         self._timestamps: deque[float] = deque()
@@ -76,6 +90,10 @@ class FlowMonitor:
         self._max_depth: int = 0
         self._depths: dict[str, int] = {}
         self._children_count: dict[str, int] = {}
+
+        # Token tracking
+        self._total_tokens_consumed: float = 0.0
+        self._tokens_per_agent: dict[str, float] = {}
 
     @property
     def velocity(self) -> float:
@@ -109,6 +127,9 @@ class FlowMonitor:
 
     def can_delegate(self) -> bool:
         """Check if delegation is allowed under current flow state."""
+        # Hard stop if system token budget is exhausted
+        if self.token_budget is not None and self._total_tokens_consumed >= self.token_budget:
+            return False
         return self.kappa_effective >= self.preservation_threshold
 
     def record_delegation(
@@ -117,6 +138,7 @@ class FlowMonitor:
         target_id: str,
         depth: int,
         fan_out: int,
+        tokens_used: float = 0.0,
     ) -> None:
         """Record a delegation event for flow tracking.
 
@@ -130,6 +152,8 @@ class FlowMonitor:
             Depth of the target in the delegation chain.
         fan_out : int
             Number of children the source now has.
+        tokens_used : float
+            Tokens consumed by this delegation (default 0.0).
         """
         now = time.time()
         self._timestamps.append(now)
@@ -144,6 +168,13 @@ class FlowMonitor:
 
         # Update fanout tracking
         self._children_count[source_id] = fan_out
+
+        # Update token tracking
+        if tokens_used > 0:
+            self._total_tokens_consumed += tokens_used
+            self._tokens_per_agent[source_id] = (
+                self._tokens_per_agent.get(source_id, 0.0) + tokens_used
+            )
 
     def compute_impedance(self) -> ImpedanceReport:
         """Compute current impedance from flow distribution statistics.
@@ -169,10 +200,17 @@ class FlowMonitor:
         # Concentration component (Gini coefficient of delegation counts)
         concentration = self._compute_concentration()
 
-        # Weighted impedance
-        w_v, w_d, w_f, w_c = self.weights
+        # Token pressure component
+        token_pressure = self._compute_token_pressure()
+
+        # Weighted impedance (5 components)
+        w_v, w_d, w_f, w_c, w_t = self.weights
         impedance = (
-            w_v * velocity_ratio + w_d * depth_ratio + w_f * fanout_ratio + w_c * concentration
+            w_v * velocity_ratio
+            + w_d * depth_ratio
+            + w_f * fanout_ratio
+            + w_c * concentration
+            + w_t * token_pressure
         )
         impedance = min(1.0, max(0.0, impedance))
 
@@ -205,6 +243,7 @@ class FlowMonitor:
             fan_out=round(fan_out_mean, 2),
             max_fan_out=max_fanout,
             concentration=round(concentration, 4),
+            token_pressure=round(token_pressure, 4),
             flow_state=state,
         )
 
@@ -236,6 +275,57 @@ class FlowMonitor:
         gini = weighted_sum / (n * total)
         return max(0.0, min(1.0, gini))
 
+    def _compute_token_pressure(self) -> float:
+        """Compute token budget pressure.
+
+        0.0 = no tokens consumed (or no budget set)
+        1.0 = budget fully exhausted
+
+        Returns 0.0 if no token_budget is configured.
+        """
+        if self.token_budget is None or self.token_budget <= 0:
+            return 0.0
+        return min(1.0, self._total_tokens_consumed / self.token_budget)
+
+    @property
+    def total_tokens_consumed(self) -> float:
+        """Total tokens consumed across all agents."""
+        return self._total_tokens_consumed
+
+    @property
+    def token_budget_remaining(self) -> Optional[float]:
+        """Remaining system-wide token budget. None if unlimited."""
+        if self.token_budget is None:
+            return None
+        return max(0.0, self.token_budget - self._total_tokens_consumed)
+
+    @property
+    def estimated_cost(self) -> float:
+        """Estimated total cost in dollars based on tokens consumed."""
+        return self._total_tokens_consumed * self.cost_per_1k_tokens / 1000.0
+
+    def get_agent_tokens(self, agent_id: str) -> float:
+        """Get tokens consumed by a specific agent."""
+        return self._tokens_per_agent.get(agent_id, 0.0)
+
+    def record_tokens(self, agent_id: str, tokens: float) -> None:
+        """Record token consumption for an agent without a delegation event.
+
+        Use this for tracking token usage during task execution (not just delegation).
+
+        Parameters
+        ----------
+        agent_id : str
+            Agent that consumed tokens.
+        tokens : float
+            Number of tokens consumed.
+        """
+        if tokens > 0:
+            self._total_tokens_consumed += tokens
+            self._tokens_per_agent[agent_id] = (
+                self._tokens_per_agent.get(agent_id, 0.0) + tokens
+            )
+
     def _prune_window(self) -> None:
         """Remove timestamps outside the rolling window."""
         cutoff = time.time() - self.window_seconds
@@ -249,3 +339,5 @@ class FlowMonitor:
         self._depths.clear()
         self._children_count.clear()
         self._max_depth = 0
+        self._total_tokens_consumed = 0.0
+        self._tokens_per_agent.clear()

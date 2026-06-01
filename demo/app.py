@@ -13,6 +13,7 @@ Demonstrates:
 
 import sys
 import time
+import random
 from pathlib import Path
 
 import streamlit as st
@@ -46,6 +47,8 @@ if "engine" not in st.session_state:
         depth_limit=6,
         fanout_limit=5,
         preservation_threshold=0.3,
+        token_budget=500000,
+        cost_per_1k_tokens=0.03,
     )
     st.session_state.history = []
     st.session_state.kappa_history = []
@@ -63,6 +66,8 @@ max_velocity = st.sidebar.slider("Max Velocity (delegations/sec)", 5, 100, 20)
 depth_limit = st.sidebar.slider("Depth Limit", 3, 20, 6)
 fanout_limit = st.sidebar.slider("Fanout Limit", 2, 20, 5)
 preservation_threshold = st.sidebar.slider("Preservation Threshold (κ)", 0.1, 0.5, 0.3)
+system_token_budget = st.sidebar.number_input("System Token Budget", value=500000, step=50000, format="%d")
+cost_per_1k = st.sidebar.number_input("Cost per 1K tokens ($)", value=0.03, step=0.005, format="%.3f")
 
 if st.sidebar.button("🔄 Reset Engine"):
     st.session_state.engine = CascadeEngine(
@@ -70,6 +75,8 @@ if st.sidebar.button("🔄 Reset Engine"):
         depth_limit=depth_limit,
         fanout_limit=fanout_limit,
         preservation_threshold=preservation_threshold,
+        token_budget=float(system_token_budget),
+        cost_per_1k_tokens=cost_per_1k,
     )
     st.session_state.history = []
     st.session_state.kappa_history = []
@@ -93,6 +100,17 @@ st.sidebar.markdown(f"**Agents:** {status.total_agents}")
 st.sidebar.markdown(f"**Delegations:** {status.total_delegations}")
 st.sidebar.markdown(f"**Cycles Detected:** {status.cycles_detected}")
 st.sidebar.markdown(f"**Blocked:** {status.delegations_blocked}")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💰 Token Budget")
+st.sidebar.markdown(f"**Consumed:** {status.total_tokens_consumed:,.0f} tokens")
+if status.total_token_budget:
+    st.sidebar.progress(status.token_budget_utilization, text=f"{status.token_budget_utilization*100:.1f}% of budget")
+    remaining = status.total_token_budget - status.total_tokens_consumed
+    cost = status.total_tokens_consumed * cost_per_1k / 1000
+    st.sidebar.markdown(f"**Remaining:** {remaining:,.0f} tokens")
+    st.sidebar.markdown(f"**Cost so far:** ${cost:.2f}")
+else:
+    st.sidebar.markdown("**Budget:** Unlimited")
 
 
 # ─── Main Content ─────────────────────────────────────────────────────────────
@@ -109,8 +127,11 @@ with col1:
     parent_selection = st.selectbox("Parent Agent", parent_options)
     parent_id = None if parent_selection == "(Root — no parent)" else parent_selection
 
+    agent_token_budget = st.number_input("Agent Token Budget (0 = unlimited)", value=0, step=10000, format="%d")
+    effective_budget = float(agent_token_budget) if agent_token_budget > 0 else None
+
     if st.button("➕ Register Agent", type="primary"):
-        result = engine.register_agent(agent_id, model_id=model_id, parent_id=parent_id)
+        result = engine.register_agent(agent_id, model_id=model_id, parent_id=parent_id, token_budget=effective_budget)
         event = {
             "time": time.time(),
             "action": "register",
@@ -135,8 +156,31 @@ with col2:
         source = st.selectbox("Source Agent", agents_list, key="del_source")
         target = st.selectbox("Target Agent", agents_list, key="del_target")
 
+        # Token consumption is randomized based on realistic agentic workloads
+        agent_complexity = st.selectbox("Task Complexity", [
+            "Simple tool call (5K–15K)",
+            "Multi-step agent (50K–200K)",
+            "Complex multi-agent (200K–1M)",
+            "Agentic coding (1M–3.5M)",
+        ], key="task_complexity")
+
+        # Map complexity to token ranges
+        complexity_ranges = {
+            "Simple tool call (5K–15K)": (5000, 15000),
+            "Multi-step agent (50K–200K)": (50000, 200000),
+            "Complex multi-agent (200K–1M)": (200000, 1000000),
+            "Agentic coding (1M–3.5M)": (1000000, 3500000),
+        }
+
         if st.button("⚡ Attempt Delegation", type="secondary"):
-            result = engine.attempt_delegation(source, target, DelegationAction.DELEGATE)
+            # Randomize token consumption within the selected range
+            token_min, token_max = complexity_ranges[agent_complexity]
+            tokens_for_delegation = random.randint(token_min, token_max)
+
+            result = engine.attempt_delegation(
+                source, target, DelegationAction.DELEGATE,
+                tokens_used=float(tokens_for_delegation),
+            )
             event = {
                 "time": time.time(),
                 "action": "delegate",
@@ -146,12 +190,14 @@ with col2:
                 "cycle": result.cycle_detected,
                 "reason": result.reason,
                 "kappa": engine.get_status().kappa_effective,
+                "tokens": tokens_for_delegation,
+                "cost": result.cost_estimate,
             }
             st.session_state.events.append(event)
             st.session_state.kappa_history.append(engine.get_status().kappa_effective)
 
             if result.allowed:
-                st.success(f"✓ Delegation {source} → {target} allowed | κ={engine.get_status().kappa_effective:.3f}")
+                st.success(f"✓ Delegation {source} → {target} | {tokens_for_delegation:,} tokens | κ={engine.get_status().kappa_effective:.3f} | cost=${result.cost_estimate:.2f}")
             else:
                 if result.cycle_detected:
                     st.error(f"🔄 CYCLE DETECTED: {source} → {target} would create circular dependency")
@@ -160,6 +206,32 @@ with col2:
             st.rerun()
     else:
         st.info("Register at least 2 agents to attempt delegations.")
+
+    # Token recording section
+    st.markdown("---")
+    st.subheader("📊 Simulate Task Execution")
+    st.markdown("*Tokens consumed per task are randomized based on real agentic workload data.*")
+    if agents_list:
+        token_agent = st.selectbox("Agent", agents_list, key="token_agent")
+        task_type = st.selectbox("Task Type", [
+            "Simple tool call (5K–15K)",
+            "Multi-step agent (50K–200K)",
+            "Complex multi-agent (200K–1M)",
+            "Agentic coding (1M–3.5M)",
+        ], key="task_type")
+
+        if st.button("🎲 Run Task (random tokens)"):
+            task_min, task_max = complexity_ranges[task_type]
+            tokens_to_record = random.randint(task_min, task_max)
+            result = engine.record_tokens(token_agent, float(tokens_to_record))
+            if result.allowed:
+                remaining_str = f"{result.token_budget_remaining:,.0f}" if result.token_budget_remaining is not None else "∞"
+                st.success(f"✓ Task consumed {tokens_to_record:,} tokens for '{token_agent}' | remaining: {remaining_str}")
+            else:
+                st.warning(f"⚠️ {token_agent} over budget! Consumed: {result.tokens_consumed:,.0f}")
+            st.rerun()
+    else:
+        st.info("Register agents first.")
 
 
 # ─── Metrics Dashboard ────────────────────────────────────────────────────────
@@ -181,6 +253,23 @@ with metric_col3:
 
 with metric_col4:
     st.metric("Delegations Blocked", status.delegations_blocked)
+
+# Token metrics row
+token_col1, token_col2, token_col3, token_col4 = st.columns(4)
+
+with token_col1:
+    st.metric("Tokens Consumed", f"{status.total_tokens_consumed:,.0f}")
+
+with token_col2:
+    budget_str = f"{status.total_token_budget:,.0f}" if status.total_token_budget else "∞"
+    st.metric("Token Budget", budget_str)
+
+with token_col3:
+    st.metric("Budget Used", f"{status.token_budget_utilization*100:.1f}%")
+
+with token_col4:
+    cost = status.total_tokens_consumed * 0.03 / 1000
+    st.metric("Total Cost", f"${cost:.2f}")
 
 
 # ─── κ History Chart ──────────────────────────────────────────────────────────
@@ -307,6 +396,30 @@ if engine.num_agents > 0:
 
 
 # ─── Cost Calculator ──────────────────────────────────────────────────────────
+
+# Per-agent token usage table
+if engine.num_agents > 0:
+    st.markdown("---")
+    st.subheader("📋 Per-Agent Token Usage")
+
+    agent_data = []
+    for aid, agent in engine._agents.items():
+        usage = engine.get_agent_token_usage(aid)
+        agent_data.append({
+            "Agent": aid,
+            "Model": agent.model_id,
+            "Tokens Used": f"{usage['tokens_consumed']:,.0f}",
+            "Budget": f"{usage['token_budget']:,.0f}" if usage['token_budget'] else "∞",
+            "Remaining": f"{usage['token_budget_remaining']:,.0f}" if usage['token_budget_remaining'] is not None else "∞",
+            "% Used": f"{usage['budget_ratio']*100:.1f}%" if usage['token_budget'] else "—",
+            "Cost": f"${usage['estimated_cost']:.2f}",
+            "Status": "🔴 OVER" if usage['over_budget'] else "🟢 OK",
+        })
+
+    if agent_data:
+        import pandas as pd
+        df = pd.DataFrame(agent_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 st.subheader("💰 Recursive Cascade Cost Calculator")

@@ -54,6 +54,8 @@ class CascadeEngine:
         fanout_limit: int = 20,
         preservation_threshold: float = 0.3,
         window_seconds: float = 60.0,
+        token_budget: Optional[float] = None,
+        cost_per_1k_tokens: float = 0.03,
     ):
         self._uf = UnionFind()
         self._flow = FlowMonitor(
@@ -62,6 +64,8 @@ class CascadeEngine:
             fanout_limit=fanout_limit,
             window_seconds=window_seconds,
             preservation_threshold=preservation_threshold,
+            token_budget=token_budget,
+            cost_per_1k_tokens=cost_per_1k_tokens,
         )
 
         # Agent registry
@@ -75,6 +79,10 @@ class CascadeEngine:
         # Limits
         self._depth_limit = depth_limit
         self._fanout_limit = fanout_limit
+
+        # Token budget config
+        self._token_budget = token_budget
+        self._cost_per_1k_tokens = cost_per_1k_tokens
 
     @property
     def num_agents(self) -> int:
@@ -92,6 +100,7 @@ class CascadeEngine:
         model_id: str = "unknown",
         parent_id: Optional[str] = None,
         metadata: Optional[dict] = None,
+        token_budget: Optional[float] = None,
     ) -> DelegationVerdict:
         """Register a new agent in the delegation graph.
 
@@ -108,6 +117,8 @@ class CascadeEngine:
             Parent agent ID. If None, this is a root agent.
         metadata : dict, optional
             Additional agent metadata.
+        token_budget : float, optional
+            Per-agent token budget. None = unlimited.
 
         Returns
         -------
@@ -133,6 +144,7 @@ class CascadeEngine:
                 parent_id=None,
                 depth=0,
                 metadata=metadata or {},
+                token_budget=token_budget,
             )
             self._agents[agent_id] = agent
             return DelegationVerdict(
@@ -173,14 +185,16 @@ class CascadeEngine:
         action: DelegationAction = DelegationAction.DELEGATE,
         model_id: str = "unknown",
         metadata: Optional[dict] = None,
+        tokens_used: float = 0.0,
     ) -> DelegationVerdict:
         """Attempt a delegation between two existing agents.
 
         Checks:
         1. Cycle detection (Union-Find)
-        2. Flow impedance (velocity, depth, fanout, concentration)
+        2. Flow impedance (velocity, depth, fanout, concentration, token pressure)
         3. Depth limit
         4. Fanout limit
+        5. Per-agent token budget
 
         Parameters
         ----------
@@ -194,6 +208,8 @@ class CascadeEngine:
             Model identifier for the delegation.
         metadata : dict, optional
             Additional metadata.
+        tokens_used : float
+            Tokens consumed by this delegation (default 0.0).
 
         Returns
         -------
@@ -207,7 +223,7 @@ class CascadeEngine:
             model_id=model_id,
             metadata=metadata or {},
         )
-        return self._execute_delegation(attempt)
+        return self._execute_delegation(attempt, tokens_used=tokens_used)
 
     def get_chain(self, agent_id: str) -> list[str]:
         """Trace the delegation chain from agent back to root.
@@ -286,6 +302,11 @@ class CascadeEngine:
             if children_count > max_fanout:
                 max_fanout = children_count
 
+        total_tokens = self._flow.total_tokens_consumed
+        budget_util = 0.0
+        if self._token_budget and self._token_budget > 0:
+            budget_util = min(1.0, total_tokens / self._token_budget)
+
         return CascadeStatus(
             total_agents=len(self._agents),
             total_delegations=self._total_delegations,
@@ -297,6 +318,9 @@ class CascadeEngine:
             flow_state=self._flow.flow_state,
             impedance=impedance,
             kappa_effective=self._flow.kappa_effective,
+            total_tokens_consumed=total_tokens,
+            total_token_budget=self._token_budget,
+            token_budget_utilization=round(budget_util, 4),
         )
 
     def revoke_agent(self, agent_id: str) -> tuple[bool, str]:
@@ -331,13 +355,15 @@ class CascadeEngine:
 
         return True, f"Revoked agent '{agent_id}' and {len(subtree) - 1} descendants"
 
-    def _execute_delegation(self, attempt: DelegationAttempt) -> DelegationVerdict:
+    def _execute_delegation(self, attempt: DelegationAttempt, tokens_used: float = 0.0) -> DelegationVerdict:
         """Execute a delegation attempt with all safety checks.
 
         Parameters
         ----------
         attempt : DelegationAttempt
             The delegation to evaluate.
+        tokens_used : float
+            Tokens consumed by this delegation.
 
         Returns
         -------
@@ -361,19 +387,41 @@ class CascadeEngine:
 
         source = self._agents[source_id]
 
+        # Check 0: Per-agent token budget
+        if tokens_used > 0 and source.token_budget is not None:
+            if source.tokens_consumed + tokens_used > source.token_budget:
+                self._delegations_blocked += 1
+                return DelegationVerdict(
+                    allowed=False,
+                    source_id=source_id,
+                    target_id=target_id,
+                    reason=f"Agent token budget exceeded: {source.tokens_consumed + tokens_used:.0f} > {source.token_budget:.0f}",
+                    impedance=self._flow.compute_impedance().impedance,
+                    flow_state=self._flow.flow_state,
+                    tokens_consumed=source.tokens_consumed,
+                    token_budget_remaining=source.token_budget_remaining,
+                )
+
         # Check 1: Flow impedance (metabolic fuse)
         if not self._flow.can_delegate():
             self._delegations_blocked += 1
             impedance = self._flow.compute_impedance()
+            # Determine if it's token budget or impedance that caused the block
+            if self._flow.token_budget is not None and self._flow._total_tokens_consumed >= self._flow.token_budget:
+                reason = f"SYSTEM TOKEN BUDGET EXHAUSTED: {self._flow._total_tokens_consumed:,.0f} / {self._flow.token_budget:,.0f} tokens consumed"
+            else:
+                reason = f"PRESERVATION mode: κ_effective={self._flow.kappa_effective:.3f} < {self._flow.preservation_threshold}"
             return DelegationVerdict(
                 allowed=False,
                 source_id=source_id,
                 target_id=target_id,
-                reason=f"PRESERVATION mode: κ_effective={self._flow.kappa_effective:.3f} < {self._flow.preservation_threshold}",
+                reason=reason,
                 impedance=impedance.impedance,
                 flow_state=FlowState.PRESERVATION,
                 cycle_detected=False,
                 velocity=impedance.velocity,
+                tokens_consumed=source.tokens_consumed,
+                token_budget_remaining=source.token_budget_remaining,
             )
 
         # Check 2: Depth limit
@@ -447,6 +495,10 @@ class CascadeEngine:
         if target_id not in source.children:
             source.children.append(target_id)
 
+        # Record token consumption on the source agent
+        if tokens_used > 0:
+            source.tokens_consumed += tokens_used
+
         # Record in flow monitor
         self._total_delegations += 1
         self._flow.record_delegation(
@@ -454,6 +506,7 @@ class CascadeEngine:
             target_id=target_id,
             depth=new_depth,
             fan_out=len(source.children),
+            tokens_used=tokens_used,
         )
 
         impedance = self._flow.compute_impedance()
@@ -468,6 +521,9 @@ class CascadeEngine:
             depth=new_depth,
             cycle_detected=False,
             velocity=impedance.velocity,
+            tokens_consumed=source.tokens_consumed,
+            token_budget_remaining=source.token_budget_remaining,
+            cost_estimate=self._flow.estimated_cost,
         )
 
     def reset(self) -> None:
@@ -478,3 +534,78 @@ class CascadeEngine:
         self._total_delegations = 0
         self._cycles_detected = 0
         self._delegations_blocked = 0
+
+    def record_tokens(self, agent_id: str, tokens: float) -> DelegationVerdict:
+        """Record token consumption for an agent (outside of delegation).
+
+        Use this to track token usage during task execution. If the agent
+        exceeds its per-agent budget, future delegations will be blocked.
+
+        Parameters
+        ----------
+        agent_id : str
+            Agent that consumed tokens.
+        tokens : float
+            Number of tokens consumed.
+
+        Returns
+        -------
+        DelegationVerdict
+            Status including whether the agent is over budget.
+        """
+        if agent_id not in self._agents:
+            return DelegationVerdict(
+                allowed=False,
+                source_id=agent_id,
+                reason=f"Agent '{agent_id}' not found",
+                flow_state=self._flow.flow_state,
+            )
+
+        agent = self._agents[agent_id]
+        agent.tokens_consumed += tokens
+        self._flow.record_tokens(agent_id, tokens)
+
+        over_budget = (
+            agent.token_budget is not None
+            and agent.tokens_consumed > agent.token_budget
+        )
+
+        return DelegationVerdict(
+            allowed=not over_budget,
+            source_id=agent_id,
+            reason="Token budget exceeded" if over_budget else "Tokens recorded",
+            flow_state=self._flow.flow_state,
+            tokens_consumed=agent.tokens_consumed,
+            token_budget_remaining=agent.token_budget_remaining,
+            cost_estimate=self._flow.estimated_cost,
+        )
+
+    def get_agent_token_usage(self, agent_id: str) -> dict:
+        """Get token usage details for a specific agent.
+
+        Parameters
+        ----------
+        agent_id : str
+            Agent to query.
+
+        Returns
+        -------
+        dict
+            Token usage details including consumed, budget, remaining, cost.
+        """
+        if agent_id not in self._agents:
+            return {"error": f"Agent '{agent_id}' not found"}
+
+        agent = self._agents[agent_id]
+        return {
+            "agent_id": agent_id,
+            "tokens_consumed": agent.tokens_consumed,
+            "token_budget": agent.token_budget,
+            "token_budget_remaining": agent.token_budget_remaining,
+            "budget_ratio": agent.token_budget_ratio,
+            "estimated_cost": agent.tokens_consumed * self._cost_per_1k_tokens / 1000.0,
+            "over_budget": (
+                agent.token_budget is not None
+                and agent.tokens_consumed > agent.token_budget
+            ),
+        }
