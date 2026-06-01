@@ -14,10 +14,12 @@ from .engine import CascadeEngine
 from .models import (
     AgentNode,
     CascadeStatus,
+    DEFAULT_MODEL_COSTS,
     DelegationAttempt,
     DelegationVerdict,
     FlowState,
     ImpedanceReport,
+    ModelCostRegistry,
 )
 from .union_find import UnionFind
 from .flow_monitor import FlowMonitor
@@ -28,10 +30,12 @@ __all__ = [
     "FlowMonitor",
     "AgentNode",
     "CascadeStatus",
+    "DEFAULT_MODEL_COSTS",
     "DelegationAttempt",
     "DelegationVerdict",
     "FlowState",
     "ImpedanceReport",
+    "ModelCostRegistry",
 ]
 
-__version__ = "2.1.0"
+__version__ = "1.3.0"

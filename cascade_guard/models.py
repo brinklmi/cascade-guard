@@ -13,6 +13,109 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
+# ---------------------------------------------------------------------------
+# Model Cost Registry — V2 model-aware pricing
+# ---------------------------------------------------------------------------
+
+# Default cost per 1K tokens by model_id.
+# "tool-agent" burns zero LLM tokens (API cost is external).
+DEFAULT_MODEL_COSTS: dict[str, float] = {
+    # OpenAI
+    "gpt-4o": 0.010,
+    "gpt-4o-mini": 0.003,
+    "gpt-4-turbo": 0.015,
+    "gpt-4": 0.045,
+    "gpt-3.5-turbo": 0.002,
+    # Anthropic
+    "claude-3.5-sonnet": 0.009,
+    "claude-3.5": 0.009,
+    "claude-3-opus": 0.045,
+    "claude-3-sonnet": 0.009,
+    "claude-3-haiku": 0.001,
+    # Meta
+    "llama-3": 0.001,
+    "llama-3-70b": 0.003,
+    # Tool agents (zero LLM cost — API cost is external)
+    "tool-agent": 0.0,
+    "tool": 0.0,
+    # Fallback
+    "unknown": 0.03,
+}
+
+
+class ModelCostRegistry:
+    """Registry mapping model_id → cost_per_1k_tokens.
+
+    Supports custom overrides and a configurable fallback rate.
+    """
+
+    def __init__(
+        self,
+        overrides: Optional[dict[str, float]] = None,
+        fallback_cost: float = 0.03,
+    ):
+        self._costs: dict[str, float] = {**DEFAULT_MODEL_COSTS}
+        if overrides:
+            self._costs.update(overrides)
+        self._fallback = fallback_cost
+
+    def get_cost(self, model_id: str) -> float:
+        """Resolve cost_per_1k_tokens for a model_id.
+
+        Performs case-insensitive prefix matching as a fallback
+        (e.g. "gpt-4o-2024-05-13" matches "gpt-4o").
+        """
+        # Exact match first
+        if model_id in self._costs:
+            return self._costs[model_id]
+
+        # Case-insensitive exact match
+        lower = model_id.lower()
+        for key, cost in self._costs.items():
+            if key.lower() == lower:
+                return cost
+
+        # Prefix match (longest prefix wins)
+        best_key = ""
+        best_cost = self._fallback
+        for key, cost in self._costs.items():
+            if lower.startswith(key.lower()) and len(key) > len(best_key):
+                best_key = key
+                best_cost = cost
+
+        return best_cost
+
+    def register(self, model_id: str, cost_per_1k: float) -> None:
+        """Register or update a model's cost."""
+        self._costs[model_id] = cost_per_1k
+
+    def all_models(self) -> dict[str, float]:
+        """Return all registered model costs."""
+        return dict(self._costs)
+
+    def suggest_cheaper_models(self, model_id: str, max_results: int = 3) -> list[dict[str, Any]]:
+        """Suggest cheaper alternatives to a given model.
+
+        Returns models sorted by cost (ascending) that are cheaper than the given model.
+        """
+        current_cost = self.get_cost(model_id)
+        if current_cost <= 0:
+            return []
+
+        alternatives = []
+        for mid, cost in self._costs.items():
+            if cost < current_cost and mid != "unknown" and cost > 0:
+                savings_pct = (1.0 - cost / current_cost) * 100
+                alternatives.append({
+                    "model_id": mid,
+                    "cost_per_1k": cost,
+                    "savings_percent": round(savings_pct, 1),
+                })
+
+        alternatives.sort(key=lambda x: x["cost_per_1k"])
+        return alternatives[:max_results]
+
+
 class DelegationAction(str, Enum):
     """Actions that can be delegated between agents."""
 
@@ -47,10 +150,16 @@ class AgentNode(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     token_budget: Optional[float] = None  # Max tokens this agent may consume (None = unlimited)
     tokens_consumed: float = 0.0  # Cumulative tokens consumed by this agent
+    cost_per_1k_tokens: float = 0.03  # V2: model-aware cost rate (resolved from registry at registration)
 
     @property
     def is_root(self) -> bool:
         return self.parent_id is None
+
+    @property
+    def estimated_cost(self) -> float:
+        """Estimated dollar cost for this agent based on its model-specific rate."""
+        return self.tokens_consumed * self.cost_per_1k_tokens / 1000.0
 
     @property
     def token_budget_remaining(self) -> Optional[float]:

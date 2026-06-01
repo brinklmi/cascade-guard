@@ -24,6 +24,7 @@ from .models import (
     DelegationAttempt,
     DelegationVerdict,
     FlowState,
+    ModelCostRegistry,
 )
 from .union_find import UnionFind
 
@@ -57,7 +58,23 @@ class CascadeEngine:
         token_budget: Optional[float] = None,
         dollar_budget: Optional[float] = None,
         cost_per_1k_tokens: float = 0.03,
+        model_cost_registry: Optional[ModelCostRegistry] = None,
     ):
+        # V2: Model-aware cost registry
+        # If user provides a custom cost_per_1k_tokens without a registry,
+        # use it as the fallback (backward-compatible flat-rate behavior).
+        # The registry only applies model-specific rates when explicitly provided.
+        if model_cost_registry is not None:
+            self._model_costs = model_cost_registry
+        else:
+            # No registry provided — flat-rate mode (V1 backward compat)
+            self._model_costs = ModelCostRegistry(
+                overrides={},
+                fallback_cost=cost_per_1k_tokens,
+            )
+            # Clear default model costs so fallback is always used
+            self._model_costs._costs = {}
+
         # If dollar_budget is set, convert to token_budget
         if dollar_budget is not None and token_budget is None:
             token_budget = (dollar_budget / cost_per_1k_tokens) * 1000
@@ -151,6 +168,7 @@ class CascadeEngine:
                 depth=0,
                 metadata=metadata or {},
                 token_budget=token_budget,
+                cost_per_1k_tokens=self._model_costs.get_cost(model_id),
             )
             self._agents[agent_id] = agent
             return DelegationVerdict(
@@ -490,6 +508,7 @@ class CascadeEngine:
                 parent_id=source_id,
                 depth=new_depth,
                 metadata=attempt.metadata,
+                cost_per_1k_tokens=self._model_costs.get_cost(attempt.model_id),
             )
             self._agents[target_id] = agent
         else:
@@ -598,6 +617,7 @@ class CascadeEngine:
         -------
         dict
             Token usage details including consumed, budget, remaining, cost.
+            V2: cost is model-aware (based on agent's model_id).
         """
         if agent_id not in self._agents:
             return {"error": f"Agent '{agent_id}' not found"}
@@ -605,13 +625,125 @@ class CascadeEngine:
         agent = self._agents[agent_id]
         return {
             "agent_id": agent_id,
+            "model_id": agent.model_id,
+            "cost_per_1k_tokens": agent.cost_per_1k_tokens,
             "tokens_consumed": agent.tokens_consumed,
             "token_budget": agent.token_budget,
             "token_budget_remaining": agent.token_budget_remaining,
             "budget_ratio": agent.token_budget_ratio,
-            "estimated_cost": agent.tokens_consumed * self._cost_per_1k_tokens / 1000.0,
+            "estimated_cost": agent.estimated_cost,
             "over_budget": (
                 agent.token_budget is not None
                 and agent.tokens_consumed > agent.token_budget
             ),
         }
+
+    # -----------------------------------------------------------------------
+    # V2: Model-Aware Cost Intelligence
+    # -----------------------------------------------------------------------
+
+    def get_cost_breakdown(self) -> dict:
+        """Get model-aware cost breakdown across all agents.
+
+        Returns a per-agent and per-model summary showing how much each
+        agent costs based on its model_id rate, not a flat system rate.
+
+        Returns
+        -------
+        dict
+            Cost breakdown with per-agent details, per-model totals,
+            and system-wide total cost.
+        """
+        per_agent = []
+        per_model: dict[str, dict] = {}
+
+        for agent in self._agents.values():
+            agent_cost = agent.estimated_cost
+            per_agent.append({
+                "agent_id": agent.id,
+                "model_id": agent.model_id,
+                "cost_per_1k_tokens": agent.cost_per_1k_tokens,
+                "tokens_consumed": agent.tokens_consumed,
+                "estimated_cost": round(agent_cost, 6),
+            })
+
+            # Aggregate by model
+            if agent.model_id not in per_model:
+                per_model[agent.model_id] = {
+                    "model_id": agent.model_id,
+                    "cost_per_1k_tokens": agent.cost_per_1k_tokens,
+                    "agent_count": 0,
+                    "total_tokens": 0.0,
+                    "total_cost": 0.0,
+                }
+            per_model[agent.model_id]["agent_count"] += 1
+            per_model[agent.model_id]["total_tokens"] += agent.tokens_consumed
+            per_model[agent.model_id]["total_cost"] += agent_cost
+
+        # Round model totals
+        for m in per_model.values():
+            m["total_cost"] = round(m["total_cost"], 6)
+
+        total_cost = sum(a["estimated_cost"] for a in per_agent)
+
+        return {
+            "total_cost": round(total_cost, 6),
+            "total_tokens": self._flow.total_tokens_consumed,
+            "per_agent": sorted(per_agent, key=lambda x: x["estimated_cost"], reverse=True),
+            "per_model": sorted(per_model.values(), key=lambda x: x["total_cost"], reverse=True),
+        }
+
+    def suggest_downgrades(self) -> list[dict]:
+        """Suggest cost-saving model downgrades for active agents.
+
+        For each agent using an expensive model, suggests cheaper alternatives
+        and calculates potential savings based on tokens already consumed.
+
+        This is the "surgical decision" feature:
+        "This task would cost $2.40 on gpt-4o but $0.12 on llama-3 — want to downgrade?"
+
+        Returns
+        -------
+        list[dict]
+            Downgrade suggestions sorted by potential savings (highest first).
+        """
+        suggestions = []
+
+        for agent in self._agents.values():
+            if agent.tokens_consumed <= 0:
+                continue
+
+            alternatives = self._model_costs.suggest_cheaper_models(agent.model_id)
+            if not alternatives:
+                continue
+
+            current_cost = agent.estimated_cost
+            for alt in alternatives:
+                alt_cost = agent.tokens_consumed * alt["cost_per_1k"] / 1000.0
+                savings = current_cost - alt_cost
+
+                if savings > 0:
+                    suggestions.append({
+                        "agent_id": agent.id,
+                        "current_model": agent.model_id,
+                        "current_cost": round(current_cost, 6),
+                        "suggested_model": alt["model_id"],
+                        "suggested_cost": round(alt_cost, 6),
+                        "savings": round(savings, 6),
+                        "savings_percent": alt["savings_percent"],
+                        "tokens_consumed": agent.tokens_consumed,
+                    })
+
+        # Sort by savings descending — biggest wins first
+        suggestions.sort(key=lambda x: x["savings"], reverse=True)
+        return suggestions
+
+    def get_model_cost_registry(self) -> ModelCostRegistry:
+        """Access the model cost registry for custom configuration.
+
+        Returns
+        -------
+        ModelCostRegistry
+            The active cost registry instance.
+        """
+        return self._model_costs
