@@ -47,7 +47,7 @@ if "engine" not in st.session_state:
         depth_limit=6,
         fanout_limit=5,
         preservation_threshold=0.3,
-        token_budget=500000,
+        dollar_budget=150.0,
         cost_per_1k_tokens=0.03,
     )
     st.session_state.history = []
@@ -66,8 +66,12 @@ max_velocity = st.sidebar.slider("Max Velocity (delegations/sec)", 5, 100, 20)
 depth_limit = st.sidebar.slider("Depth Limit", 3, 20, 6)
 fanout_limit = st.sidebar.slider("Fanout Limit", 2, 20, 5)
 preservation_threshold = st.sidebar.slider("Preservation Threshold (κ)", 0.1, 0.5, 0.3)
-system_token_budget = st.sidebar.number_input("System Token Budget", value=500000, step=50000, format="%d")
+dollar_budget = st.sidebar.number_input("💰 Monthly Budget ($)", value=150.0, step=25.0, format="%.2f")
 cost_per_1k = st.sidebar.number_input("Cost per 1K tokens ($)", value=0.03, step=0.005, format="%.3f")
+
+# Show the implied token budget
+implied_tokens = (dollar_budget / cost_per_1k) * 1000 if cost_per_1k > 0 else 0
+st.sidebar.caption(f"≈ {implied_tokens:,.0f} tokens at ${cost_per_1k}/1K")
 
 if st.sidebar.button("🔄 Reset Engine"):
     st.session_state.engine = CascadeEngine(
@@ -75,7 +79,7 @@ if st.sidebar.button("🔄 Reset Engine"):
         depth_limit=depth_limit,
         fanout_limit=fanout_limit,
         preservation_threshold=preservation_threshold,
-        token_budget=float(system_token_budget),
+        dollar_budget=dollar_budget,
         cost_per_1k_tokens=cost_per_1k,
     )
     st.session_state.history = []
@@ -105,10 +109,11 @@ st.sidebar.markdown("### 💰 Token Budget")
 st.sidebar.markdown(f"**Consumed:** {status.total_tokens_consumed:,.0f} tokens")
 if status.total_token_budget:
     st.sidebar.progress(status.token_budget_utilization, text=f"{status.token_budget_utilization*100:.1f}% of budget")
-    remaining = status.total_token_budget - status.total_tokens_consumed
-    cost = status.total_tokens_consumed * cost_per_1k / 1000
-    st.sidebar.markdown(f"**Remaining:** {remaining:,.0f} tokens")
-    st.sidebar.markdown(f"**Cost so far:** ${cost:.2f}")
+    remaining_tokens = status.total_token_budget - status.total_tokens_consumed
+    cost_spent = status.total_tokens_consumed * cost_per_1k / 1000
+    cost_remaining = remaining_tokens * cost_per_1k / 1000
+    st.sidebar.markdown(f"**Spent:** ${cost_spent:.2f} of ${dollar_budget:.2f}")
+    st.sidebar.markdown(f"**Remaining:** ${max(0, cost_remaining):.2f}")
 else:
     st.sidebar.markdown("**Budget:** Unlimited")
 
@@ -220,16 +225,43 @@ with col2:
             "Agentic coding (1M–3.5M)",
         ], key="task_type")
 
-        if st.button("🎲 Run Task (random tokens)"):
-            task_min, task_max = complexity_ranges[task_type]
-            tokens_to_record = random.randint(task_min, task_max)
-            result = engine.record_tokens(token_agent, float(tokens_to_record))
-            if result.allowed:
-                remaining_str = f"{result.token_budget_remaining:,.0f}" if result.token_budget_remaining is not None else "∞"
-                st.success(f"✓ Task consumed {tokens_to_record:,} tokens for '{token_agent}' | remaining: {remaining_str}")
-            else:
-                st.warning(f"⚠️ {token_agent} over budget! Consumed: {result.tokens_consumed:,.0f}")
-            st.rerun()
+        single_col, batch_col = st.columns(2)
+
+        with single_col:
+            if st.button("🎲 Run 1 Task"):
+                task_min, task_max = complexity_ranges[task_type]
+                tokens_to_record = random.randint(task_min, task_max)
+                result = engine.record_tokens(token_agent, float(tokens_to_record))
+                if result.allowed:
+                    remaining_str = f"{result.token_budget_remaining:,.0f}" if result.token_budget_remaining is not None else "∞"
+                    st.success(f"✓ Task consumed {tokens_to_record:,} tokens | remaining: {remaining_str}")
+                else:
+                    st.warning(f"⚠️ {token_agent} over budget! Consumed: {result.tokens_consumed:,.0f}")
+                st.rerun()
+
+        with batch_col:
+            batch_size = st.number_input("Batch size", value=10, min_value=1, max_value=100, step=1, key="batch_size")
+            if st.button("▶️ Run Batch"):
+                task_min, task_max = complexity_ranges[task_type]
+                total_batch_tokens = 0
+                tasks_completed = 0
+                budget_hit = False
+
+                for i in range(int(batch_size)):
+                    tokens_this_task = random.randint(task_min, task_max)
+                    result = engine.record_tokens(token_agent, float(tokens_this_task))
+                    total_batch_tokens += tokens_this_task
+                    tasks_completed += 1
+                    if not result.allowed:
+                        budget_hit = True
+                        break
+
+                batch_cost = total_batch_tokens * cost_per_1k / 1000
+                if budget_hit:
+                    st.error(f"🔴 Budget exceeded after {tasks_completed}/{int(batch_size)} tasks | {total_batch_tokens:,} tokens | ${batch_cost:.2f}")
+                else:
+                    st.success(f"✓ Batch complete: {tasks_completed} tasks | {total_batch_tokens:,} tokens | ${batch_cost:.2f}")
+                st.rerun()
     else:
         st.info("Register agents first.")
 
