@@ -55,8 +55,13 @@ class CascadeEngine:
         preservation_threshold: float = 0.3,
         window_seconds: float = 60.0,
         token_budget: Optional[float] = None,
+        dollar_budget: Optional[float] = None,
         cost_per_1k_tokens: float = 0.03,
     ):
+        # If dollar_budget is set, convert to token_budget
+        if dollar_budget is not None and token_budget is None:
+            token_budget = (dollar_budget / cost_per_1k_tokens) * 1000
+
         self._uf = UnionFind()
         self._flow = FlowMonitor(
             max_velocity=max_velocity,
@@ -82,6 +87,7 @@ class CascadeEngine:
 
         # Token budget config
         self._token_budget = token_budget
+        self._dollar_budget = dollar_budget
         self._cost_per_1k_tokens = cost_per_1k_tokens
 
     @property

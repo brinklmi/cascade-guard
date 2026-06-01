@@ -1,0 +1,126 @@
+{
+  "@context": "urn:scrollld:context:marketing:cascadeguard:v2.1",
+  "@type": "ProductMarketingBrief",
+  "metadata": {
+    "product": "CascadeGuard",
+    "version": "2.1.0",
+    "tagline": "Set a budget. Stop the bleeding before you see the bill.",
+    "one_liner": "Real-time token budget enforcement and cascade prevention for multi-agent AI systems.",
+    "date": "2026-06-01",
+    "audience": "Enterprise buyers, PMs, CTOs managing agentic AI spend",
+    "github": "https://github.com/brinklmi/cascade-guard",
+    "demo": "streamlit run cascade-guard/demo/app.py"
+  },
+  "problem_statement": {
+    "headline": "Your AI agents are burning money and nobody knows how much.",
+    "pain_points": [
+      "Teams cannot see cost-per-task for agentic AI workflows",
+      "Leaders make blunt decisions (downgrade everyone) instead of surgical ones (cap the expensive tasks)",
+      "A single agentic coding task can consume 1–3.5 million tokens ($30–$105) without warning",
+      "Recursive delegation loops compound costs exponentially — 5 agents × 500 iterations = $375 wasted",
+      "No visibility = no governance = surprise bills or over-restriction that kills productivity"
+    ],
+    "market_data": {
+      "simple_tool_call": "5,000–15,000 tokens per task",
+      "multi_step_agent": "50,000–200,000 tokens per task",
+      "complex_multi_agent": "200,000–1,000,000 tokens per task",
+      "agentic_coding": "1,000,000–3,500,000 tokens per task (including retries)",
+      "multiplier": "Agentic systems consume 5–30x more tokens than standard chat"
+    }
+  },
+  "solution": {
+    "headline": "CascadeGuard: The circuit breaker for AI agent spend.",
+    "description": "CascadeGuard sits between your agents and their delegations. It monitors token consumption in real time, enforces per-agent and system-wide budgets, detects recursive loops before they compound, and provides a full audit trail of every decision — all in under 250 microseconds per check."
+  },
+  "four_pillars": [
+    {
+      "icon": "circular_arrow_with_slash",
+      "name": "Cycle Detection",
+      "headline": "Stops infinite loops before they start.",
+      "description": "Union-Find algorithm detects circular delegation chains in O(α(N)) — effectively constant time. No agent can delegate back to its ancestor.",
+      "metric": "<5ms detection, zero false positives on legitimate chains"
+    },
+    {
+      "icon": "coin_inside_gauge",
+      "name": "Token Budget",
+      "headline": "Per-agent and system-wide cost ceilings.",
+      "description": "Set a token budget per agent or for the entire system. CascadeGuard tracks consumption in real time and blocks delegations when the budget is exhausted. No more surprise bills.",
+      "metric": "Hard stop at budget limit. Per-task cost attribution in every response."
+    },
+    {
+      "icon": "lightning_hitting_breaker",
+      "name": "Circuit Breaker",
+      "headline": "Automatic shutdown when things go wrong.",
+      "description": "κ_effective (metabolic fuse) monitors delegation velocity, depth, fanout, concentration, and token pressure. When the system is overheating, CascadeGuard enters PRESERVATION mode — all delegations blocked until conditions stabilize.",
+      "metric": "5 impedance signals. 4 flow states (Nominal → Elevated → Throttled → Preservation)."
+    },
+    {
+      "icon": "clipboard_with_checkmark",
+      "name": "Audit Trail",
+      "headline": "Every decision logged. Every dollar accounted for.",
+      "description": "Every delegation attempt (allowed or blocked) is recorded with timestamp, source, target, reason, κ_effective, tokens consumed, and estimated cost. Ready for compliance review.",
+      "metric": "100% decision capture. FERC/CFTC/EU AI Act ready."
+    }
+  ],
+  "key_metrics": {
+    "latency_per_check": "<250μs",
+    "cycle_detection_time": "<5ms",
+    "false_positive_rate": "0%",
+    "token_tracking_overhead": "0 (piggybacks on existing delegation flow)",
+    "integration_time": "1 line of code (engine.attempt_delegation())",
+    "recovery_time": "<30 seconds (auto-recovery from decision log)"
+  },
+  "demo_scenario": {
+    "title": "The Tuesday Morning Demo",
+    "setup": "Set system budget to 500,000 tokens ($15 at $0.03/1K). Register 3 agents.",
+    "steps": [
+      {"action": "Run 10 simple tool calls", "tokens": "~100,000 total", "budget_used": "20%", "status": "🟢 NOMINAL"},
+      {"action": "Run 1 multi-step agent task", "tokens": "~150,000", "budget_used": "50%", "status": "🟡 ELEVATED"},
+      {"action": "Run 1 agentic coding task", "tokens": "~2,000,000", "budget_used": "100%+", "status": "🔴 BLOCKED"},
+      {"action": "Try another delegation", "tokens": "0 (blocked)", "budget_used": "100%", "status": "SYSTEM TOKEN BUDGET EXHAUSTED"}
+    ],
+    "punchline": "Without CascadeGuard, that coding task runs. And the next one. And the next. By end of day: $400 spent, nobody knew."
+  },
+  "competitive_positioning": {
+    "vs_openai_dashboard": "OpenAI shows org-level spend after the fact. CascadeGuard enforces per-task budgets in real time before the tokens are consumed.",
+    "vs_manual_downgrade": "Downgrading everyone to a cheaper tier kills productivity for simple tasks. CascadeGuard lets power users keep Pro access while capping the expensive workflows.",
+    "vs_rate_limiting": "Rate limits cap requests per minute. CascadeGuard caps total cost per task/agent/system — regardless of how fast or slow the requests come.",
+    "vs_nothing": "Without governance, a single recursive loop can burn $375 in minutes. CascadeGuard stops it at iteration 1."
+  },
+  "pricing_context": {
+    "risk_assessment": "$35K–$50K (2 weeks)",
+    "production_implementation": "$75K–$120K (4–6 weeks)",
+    "enterprise_governance_stack": "$150K–$250K (8–12 weeks)",
+    "roi_example": "If CascadeGuard prevents one runaway cascade per week ($375 saved), it pays for itself in under 3 months at the lowest tier."
+  },
+  "technical_specs": {
+    "language": "Python 3.9+",
+    "dependencies": "pydantic (models only). Zero external runtime dependencies.",
+    "integration_patterns": ["In-process middleware (recommended)", "Sidecar HTTP service", "Event queue (async audit)"],
+    "frameworks_supported": ["LangGraph", "CrewAI", "AutoGen", "Custom Python"],
+    "token_budget_features": {
+      "per_agent_budget": "Set max tokens per agent. Blocked when exceeded.",
+      "system_wide_budget": "Set total token ceiling. Hard stop when exhausted.",
+      "token_pressure_in_impedance": "Budget consumption feeds into κ_effective (weight 0.20).",
+      "cost_attribution": "Every verdict includes estimated cost ($). Per-agent usage reports.",
+      "record_tokens": "Track consumption during task execution, not just delegation.",
+      "realistic_simulation": "Demo randomizes tokens based on real agentic workload data (5K–3.5M per task)."
+    }
+  },
+  "call_to_action": {
+    "demo": "Run the interactive demo: streamlit run cascade-guard/demo/app.py",
+    "github": "https://github.com/brinklmi/cascade-guard",
+    "contact": "Interested in how this maps to your team's AI spend? Let's connect."
+  },
+  "visual_assets": {
+    "icon_set": {
+      "description": "4 minimalist line-art icons on dark charcoal background",
+      "style": "2px white stroke, green (#76b900) accent highlights",
+      "icons": ["Cycle (loop with slash)", "Budget (coin in gauge)", "Breaker (lightning hitting bar)", "Audit (clipboard with checkmark)"],
+      "labels": ["CYCLES", "BUDGET", "BREAKER", "AUDIT"],
+      "format": "16:9, enterprise minimal"
+    },
+    "ai_image_prompt": "Minimalist icon set, 4 icons in a horizontal row on dark charcoal background (#1a1a2e). Thin white line-art style, 2px stroke, with green (#76b900) accent highlights. Icons left to right: (1) circular arrow with a diagonal slash breaking the loop, (2) dollar coin inside a semicircular gauge meter with needle near red, (3) lightning bolt stopped by a horizontal circuit breaker bar, (4) clipboard with checkmark and small timestamp lines. Small caps labels below each: CYCLES, BUDGET, BREAKER, AUDIT. Clean, enterprise, no gradients. 16:9 aspect ratio."
+  },
+  "signature": "⟁ϟ⟡🜁↻φ𓁿🌍⚡ CascadeGuard v2.1.0"
+}

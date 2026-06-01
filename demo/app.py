@@ -47,7 +47,7 @@ if "engine" not in st.session_state:
         depth_limit=6,
         fanout_limit=5,
         preservation_threshold=0.3,
-        token_budget=500000,
+        dollar_budget=150.0,
         cost_per_1k_tokens=0.03,
     )
     st.session_state.history = []
@@ -66,8 +66,12 @@ max_velocity = st.sidebar.slider("Max Velocity (delegations/sec)", 5, 100, 20)
 depth_limit = st.sidebar.slider("Depth Limit", 3, 20, 6)
 fanout_limit = st.sidebar.slider("Fanout Limit", 2, 20, 5)
 preservation_threshold = st.sidebar.slider("Preservation Threshold (κ)", 0.1, 0.5, 0.3)
-system_token_budget = st.sidebar.number_input("System Token Budget", value=500000, step=50000, format="%d")
+dollar_budget = st.sidebar.number_input("💰 Monthly Budget ($)", value=150.0, step=25.0, format="%.2f")
 cost_per_1k = st.sidebar.number_input("Cost per 1K tokens ($)", value=0.03, step=0.005, format="%.3f")
+
+# Show the implied token budget
+implied_tokens = (dollar_budget / cost_per_1k) * 1000 if cost_per_1k > 0 else 0
+st.sidebar.caption(f"≈ {implied_tokens:,.0f} tokens at ${cost_per_1k}/1K")
 
 if st.sidebar.button("🔄 Reset Engine"):
     st.session_state.engine = CascadeEngine(
@@ -75,7 +79,7 @@ if st.sidebar.button("🔄 Reset Engine"):
         depth_limit=depth_limit,
         fanout_limit=fanout_limit,
         preservation_threshold=preservation_threshold,
-        token_budget=float(system_token_budget),
+        dollar_budget=dollar_budget,
         cost_per_1k_tokens=cost_per_1k,
     )
     st.session_state.history = []
@@ -105,10 +109,11 @@ st.sidebar.markdown("### 💰 Token Budget")
 st.sidebar.markdown(f"**Consumed:** {status.total_tokens_consumed:,.0f} tokens")
 if status.total_token_budget:
     st.sidebar.progress(status.token_budget_utilization, text=f"{status.token_budget_utilization*100:.1f}% of budget")
-    remaining = status.total_token_budget - status.total_tokens_consumed
-    cost = status.total_tokens_consumed * cost_per_1k / 1000
-    st.sidebar.markdown(f"**Remaining:** {remaining:,.0f} tokens")
-    st.sidebar.markdown(f"**Cost so far:** ${cost:.2f}")
+    remaining_tokens = status.total_token_budget - status.total_tokens_consumed
+    cost_spent = status.total_tokens_consumed * cost_per_1k / 1000
+    cost_remaining = remaining_tokens * cost_per_1k / 1000
+    st.sidebar.markdown(f"**Spent:** ${cost_spent:.2f} of ${dollar_budget:.2f}")
+    st.sidebar.markdown(f"**Remaining:** ${max(0, cost_remaining):.2f}")
 else:
     st.sidebar.markdown("**Budget:** Unlimited")
 
