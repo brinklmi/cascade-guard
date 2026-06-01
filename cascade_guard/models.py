@@ -35,7 +35,7 @@ class AgentNode(BaseModel):
     """An agent in the delegation graph.
 
     Maps to a node in the Union-Find forest.
-    Tracks delegation depth and spawn metadata.
+    Tracks delegation depth, token usage, and spawn metadata.
     """
 
     id: str
@@ -45,10 +45,26 @@ class AgentNode(BaseModel):
     created_at: float = Field(default_factory=time.time)
     children: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    token_budget: Optional[float] = None  # Max tokens this agent may consume (None = unlimited)
+    tokens_consumed: float = 0.0  # Cumulative tokens consumed by this agent
 
     @property
     def is_root(self) -> bool:
         return self.parent_id is None
+
+    @property
+    def token_budget_remaining(self) -> Optional[float]:
+        """Remaining token budget. None if unlimited."""
+        if self.token_budget is None:
+            return None
+        return max(0.0, self.token_budget - self.tokens_consumed)
+
+    @property
+    def token_budget_ratio(self) -> float:
+        """Fraction of budget consumed (0.0 = fresh, 1.0 = exhausted). 0.0 if unlimited."""
+        if self.token_budget is None or self.token_budget <= 0:
+            return 0.0
+        return min(1.0, self.tokens_consumed / self.token_budget)
 
 
 class DelegationAttempt(BaseModel):
@@ -74,6 +90,9 @@ class DelegationVerdict(BaseModel):
     depth: int = 0
     cycle_detected: bool = False
     velocity: float = 0.0  # delegations/second in current window
+    tokens_consumed: float = 0.0  # tokens consumed by source agent so far
+    token_budget_remaining: Optional[float] = None  # remaining budget for source (None = unlimited)
+    cost_estimate: float = 0.0  # estimated cost in dollars for this delegation chain
 
 
 class ImpedanceReport(BaseModel):
@@ -84,6 +103,7 @@ class ImpedanceReport(BaseModel):
     - depth_distribution: how deep delegation chains are getting
     - fan_out: average children per agent
     - concentration: how concentrated delegations are (Gini-like)
+    - token_pressure: how close the system is to its token budget
     """
 
     impedance: float = 0.0  # 0.0 = free flow, 1.0 = fully blocked
@@ -93,6 +113,7 @@ class ImpedanceReport(BaseModel):
     fan_out: float = 0.0  # average children per parent
     max_fan_out: int = 0  # widest single parent
     concentration: float = 0.0  # delegation concentration (0=uniform, 1=single source)
+    token_pressure: float = 0.0  # token budget pressure (0=fresh, 1=exhausted)
     flow_state: FlowState = FlowState.NOMINAL
 
 
@@ -109,3 +130,6 @@ class CascadeStatus(BaseModel):
     flow_state: FlowState = FlowState.NOMINAL
     impedance: ImpedanceReport = Field(default_factory=ImpedanceReport)
     kappa_effective: float = 1.0
+    total_tokens_consumed: float = 0.0  # Total tokens consumed across all agents
+    total_token_budget: Optional[float] = None  # System-wide token budget (None = unlimited)
+    token_budget_utilization: float = 0.0  # 0.0 to 1.0
