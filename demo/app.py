@@ -225,6 +225,13 @@ with col2:
             "Agentic coding (1M–3.5M)",
         ], key="task_type")
 
+        complexity_ranges = {
+            "Simple tool call (5K–15K)": (5000, 15000),
+            "Multi-step agent (50K–200K)": (50000, 200000),
+            "Complex multi-agent (200K–1M)": (200000, 1000000),
+            "Agentic coding (1M–3.5M)": (1000000, 3500000),
+        }
+
         single_col, batch_col = st.columns(2)
 
         with single_col:
