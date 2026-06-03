@@ -613,7 +613,7 @@ class CascadeEngine:
         if over_global_budget:
             reason = f"SYSTEM BUDGET EXHAUSTED: {self._flow.total_tokens_consumed:,.0f} / {self._token_budget:,.0f} tokens"
         elif over_agent_budget:
-            reason = "Token budget exceeded"
+            reason = f"Agent budget exceeded: {agent.tokens_consumed:,.0f} > {agent.token_budget:,.0f}"
         else:
             reason = "Tokens recorded"
 
@@ -623,7 +623,7 @@ class CascadeEngine:
             reason=reason,
             flow_state=self._flow.flow_state,
             tokens_consumed=agent.tokens_consumed,
-            token_budget_remaining=agent.token_budget_remaining,
+            token_budget_remaining=max(0.0, agent.token_budget - agent.tokens_consumed) if agent.token_budget is not None else None,
             cost_estimate=self._flow.estimated_cost,
         )
 
