@@ -240,6 +240,8 @@ with col2:
                 current_status = engine.get_status()
                 if current_status.total_token_budget and current_status.total_tokens_consumed >= current_status.total_token_budget:
                     st.error(f"🔴 SYSTEM HALTED: Budget exhausted. No further tasks allowed.")
+                elif token_agent in engine._agents and engine._agents[token_agent].token_budget is not None and engine._agents[token_agent].tokens_consumed >= engine._agents[token_agent].token_budget:
+                    st.error(f"🔴 AGENT HALTED: {token_agent} has exceeded its budget ({engine._agents[token_agent].tokens_consumed:,.0f} / {engine._agents[token_agent].token_budget:,.0f} tokens)")
                 else:
                     task_min, task_max = complexity_ranges[task_type]
                     tokens_to_record = random.randint(task_min, task_max)
@@ -258,6 +260,8 @@ with col2:
                 current_status = engine.get_status()
                 if current_status.total_token_budget and current_status.total_tokens_consumed >= current_status.total_token_budget:
                     st.error(f"🔴 SYSTEM HALTED: Budget exhausted ({current_status.total_tokens_consumed:,.0f} / {current_status.total_token_budget:,.0f} tokens). No further tasks allowed.")
+                elif token_agent in engine._agents and engine._agents[token_agent].token_budget is not None and engine._agents[token_agent].tokens_consumed >= engine._agents[token_agent].token_budget:
+                    st.error(f"🔴 AGENT HALTED: {token_agent} has exceeded its budget ({engine._agents[token_agent].tokens_consumed:,.0f} / {engine._agents[token_agent].token_budget:,.0f} tokens)")
                 else:
                     task_min, task_max = complexity_ranges[task_type]
                     total_batch_tokens = 0
