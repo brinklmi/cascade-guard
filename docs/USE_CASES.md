@@ -153,6 +153,32 @@ assert result.cycle_detected
 2. **Per-agent budgets** — Individual agents halt when their allocation is consumed
 3. **Global budget ceiling** — System-wide halt when monthly cap is hit, regardless of which agent caused it
 
+**Inline Guardrail Architecture:**
+
+```mermaid
+graph TD
+
+%% Styling
+classDef runtime fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
+classDef coreLogic fill:#0f172a,stroke:#10b981,stroke-width:2px,color:#fff;
+classDef external fill:#451a03,stroke:#ea580c,stroke-width:1px,color:#fff;
+
+subgraph Agent_Runtime [Agent Execution Loop]
+A[Agent Alpha]:::runtime -->|1. Request Task Delegation| B(Agent Beta):::runtime
+end
+
+subgraph CascadeGuard_Engine [Inline Guardrail Layer]
+B -->|2. Intercept Event Payload| UF{Union-Find Engine <br/> Cycle Detection}:::coreLogic
+UF -->|No Loop Detected| V[Velocity & Token <br/> Budget Counter]:::coreLogic
+UF -->|Loop Detected!| CB[Trip Circuit Breaker]:::coreLogic
+end
+
+subgraph Infrastructure [Target Endpoint]
+V -->|3. Forward Request| LLM[Paid LLM API Provider <br/> $0.03 / 1k Tokens]:::external
+CB -->|3. Halt Execution Thread| ABORT[Return 0 Cost Safe Fallback]:::runtime
+end
+```
+
 ---
 
 ## 3. Drone Swarm Coordination
