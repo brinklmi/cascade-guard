@@ -200,7 +200,13 @@ class CascadeEngine:
             model_id=model_id,
             metadata=metadata or {},
         )
-        return self._execute_delegation(attempt)
+        result = self._execute_delegation(attempt)
+
+        # Apply per-agent token budget if registration was allowed
+        if result.allowed and token_budget is not None:
+            self._agents[agent_id].token_budget = token_budget
+
+        return result
 
     def attempt_delegation(
         self,
@@ -590,15 +596,31 @@ class CascadeEngine:
         agent.tokens_consumed += tokens
         self._flow.record_tokens(agent_id, tokens)
 
-        over_budget = (
+        # Check per-agent budget
+        over_agent_budget = (
             agent.token_budget is not None
             and agent.tokens_consumed > agent.token_budget
         )
 
+        # Check global system budget (monthly cap)
+        over_global_budget = (
+            self._token_budget is not None
+            and self._flow.total_tokens_consumed >= self._token_budget
+        )
+
+        over_budget = over_agent_budget or over_global_budget
+
+        if over_global_budget:
+            reason = f"SYSTEM BUDGET EXHAUSTED: {self._flow.total_tokens_consumed:,.0f} / {self._token_budget:,.0f} tokens"
+        elif over_agent_budget:
+            reason = "Token budget exceeded"
+        else:
+            reason = "Tokens recorded"
+
         return DelegationVerdict(
             allowed=not over_budget,
             source_id=agent_id,
-            reason="Token budget exceeded" if over_budget else "Tokens recorded",
+            reason=reason,
             flow_state=self._flow.flow_state,
             tokens_consumed=agent.tokens_consumed,
             token_budget_remaining=agent.token_budget_remaining,
@@ -747,3 +769,100 @@ class CascadeEngine:
             The active cost registry instance.
         """
         return self._model_costs
+
+    # -----------------------------------------------------------------------
+    # SLCF Integration (Req 13)
+    # -----------------------------------------------------------------------
+
+    def load_from_slcf(self, data: bytes) -> None:
+        """Initialize engine state from SLCF binary data.
+
+        Performs footer-first validation, then:
+        1. Rejects if Σδ > 2 for any page group
+        2. Sets metabolic fuse = footer κ_effective
+        3. Seeds Union-Find with β₁ cycle hints (if present)
+        4. If β₁ absent, computes from agent graph on first traversal
+
+        Parameters
+        ----------
+        data : bytes
+            Complete SLCF binary data.
+
+        Raises
+        ------
+        SLCFComplianceError
+            If Σδ > 2 for any page group.
+        SLCFIntegrityError
+            If Maat hash validation fails.
+        SLCFValidationError
+            If κ_eff is out of range.
+        SLCFStructureError
+            If L3 page index is missing.
+        """
+        from cascade_guard.slcf.reader import SLCFReader
+
+        reader = SLCFReader()
+        slcf_file = reader.open(data)
+
+        # Use footer κ_effective as initial metabolic fuse
+        self._kappa_effective = slcf_file.kappa_effective
+
+        # Seed Union-Find with β₁ cycle hints
+        if slcf_file.beta_one > 0:
+            self._uf._cycle_hints = slcf_file.beta_one
+        else:
+            # Will compute from agent graph on first traversal
+            self._uf._cycle_hints = 0
+
+    def track_glyph_compression(self, glyph_bytes: int) -> None:
+        """Deduct glyph token equivalent from active token budget.
+
+        Conversion: tokens = glyph_bytes / 4 (4 bytes per token).
+
+        Parameters
+        ----------
+        glyph_bytes : int
+            Size of compressed glyph output in bytes.
+        """
+        token_equivalent = glyph_bytes / 4.0
+        # Deduct from system-wide token tracking via flow monitor
+        self._flow.record_tokens("__glyph_compression__", token_equivalent)
+
+    def store_decision_log(self, verdict: DelegationVerdict) -> dict:
+        """Create an SLCF L5 governance decision log entry.
+
+        Parameters
+        ----------
+        verdict : DelegationVerdict
+            The delegation verdict to log.
+
+        Returns
+        -------
+        dict
+            Decision log entry with all required fields.
+        """
+        import time
+
+        from cascade_guard.maat.validator import MaatValidator, ValidationContext
+
+        # Compute Maat score for this decision
+        validator = MaatValidator()
+        ctx = ValidationContext(
+            sigma_delta=0.0,
+            kappa_effective=getattr(self, "_kappa_effective", 1.0),
+            agent_count=self.num_agents,
+            max_depth=self._status.max_depth if hasattr(self, "_status") else 0,
+            resource_id=f"decision:{verdict.source_id}",
+        )
+        maat_result = validator.evaluate("decision_log", ctx)
+
+        return {
+            "timestamp": time.time(),
+            "source_agent": verdict.source_id,
+            "target_agent": verdict.target_id,
+            "verdict": "allowed" if verdict.allowed else "blocked",
+            "cycle_detected": verdict.cycle_detected,
+            "flow_state": verdict.flow_state.value,
+            "kappa_effective": getattr(self, "_kappa_effective", 1.0),
+            "maat_validation_score": maat_result.overall_score,
+        }

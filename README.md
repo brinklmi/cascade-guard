@@ -133,6 +133,22 @@ cascade-guard-demo
 
 Runs five scenarios: normal delegation chains, cycle detection, depth limits, fanout limits, and velocity-based impedance.
 
+## Interactive Dashboard
+
+```bash
+pip install streamlit plotly pandas
+streamlit run demo/app.py
+```
+
+Visual Streamlit dashboard with:
+- Real-time delegation graph visualization
+- κ_effective impedance monitoring with live chart
+- Flow state transitions (Green → Yellow → Red)
+- Per-agent token usage tracking with budget enforcement
+- Batch task simulation with randomized agentic workloads
+- Recursive cascade cost calculator
+- Global budget halt (system stops when monthly cap is hit)
+
 ---
 
 ## Architecture

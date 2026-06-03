@@ -225,42 +225,59 @@ with col2:
             "Agentic coding (1M–3.5M)",
         ], key="task_type")
 
+        complexity_ranges = {
+            "Simple tool call (5K–15K)": (5000, 15000),
+            "Multi-step agent (50K–200K)": (50000, 200000),
+            "Complex multi-agent (200K–1M)": (200000, 1000000),
+            "Agentic coding (1M–3.5M)": (1000000, 3500000),
+        }
+
         single_col, batch_col = st.columns(2)
 
         with single_col:
             if st.button("🎲 Run 1 Task"):
-                task_min, task_max = complexity_ranges[task_type]
-                tokens_to_record = random.randint(task_min, task_max)
-                result = engine.record_tokens(token_agent, float(tokens_to_record))
-                if result.allowed:
-                    remaining_str = f"{result.token_budget_remaining:,.0f}" if result.token_budget_remaining is not None else "∞"
-                    st.success(f"✓ Task consumed {tokens_to_record:,} tokens | remaining: {remaining_str}")
+                # Pre-check global budget
+                current_status = engine.get_status()
+                if current_status.total_token_budget and current_status.total_tokens_consumed >= current_status.total_token_budget:
+                    st.error(f"🔴 SYSTEM HALTED: Budget exhausted. No further tasks allowed.")
                 else:
-                    st.warning(f"⚠️ {token_agent} over budget! Consumed: {result.tokens_consumed:,.0f}")
+                    task_min, task_max = complexity_ranges[task_type]
+                    tokens_to_record = random.randint(task_min, task_max)
+                    result = engine.record_tokens(token_agent, float(tokens_to_record))
+                    if result.allowed:
+                        remaining_str = f"{result.token_budget_remaining:,.0f}" if result.token_budget_remaining is not None else "∞"
+                        st.success(f"✓ Task consumed {tokens_to_record:,} tokens | remaining: {remaining_str}")
+                    else:
+                        st.error(f"🔴 HALTED: {result.reason}")
                 st.rerun()
 
         with batch_col:
             batch_size = st.number_input("Batch size", value=10, min_value=1, max_value=100, step=1, key="batch_size")
             if st.button("▶️ Run Batch"):
-                task_min, task_max = complexity_ranges[task_type]
-                total_batch_tokens = 0
-                tasks_completed = 0
-                budget_hit = False
-
-                for i in range(int(batch_size)):
-                    tokens_this_task = random.randint(task_min, task_max)
-                    result = engine.record_tokens(token_agent, float(tokens_this_task))
-                    total_batch_tokens += tokens_this_task
-                    tasks_completed += 1
-                    if not result.allowed:
-                        budget_hit = True
-                        break
-
-                batch_cost = total_batch_tokens * cost_per_1k / 1000
-                if budget_hit:
-                    st.error(f"🔴 Budget exceeded after {tasks_completed}/{int(batch_size)} tasks | {total_batch_tokens:,} tokens | ${batch_cost:.2f}")
+                # Pre-check: is the system already over budget?
+                current_status = engine.get_status()
+                if current_status.total_token_budget and current_status.total_tokens_consumed >= current_status.total_token_budget:
+                    st.error(f"🔴 SYSTEM HALTED: Budget exhausted ({current_status.total_tokens_consumed:,.0f} / {current_status.total_token_budget:,.0f} tokens). No further tasks allowed.")
                 else:
-                    st.success(f"✓ Batch complete: {tasks_completed} tasks | {total_batch_tokens:,} tokens | ${batch_cost:.2f}")
+                    task_min, task_max = complexity_ranges[task_type]
+                    total_batch_tokens = 0
+                    tasks_completed = 0
+                    budget_hit = False
+
+                    for i in range(int(batch_size)):
+                        tokens_this_task = random.randint(task_min, task_max)
+                        result = engine.record_tokens(token_agent, float(tokens_this_task))
+                        total_batch_tokens += tokens_this_task
+                        tasks_completed += 1
+                        if not result.allowed:
+                            budget_hit = True
+                            break
+
+                    batch_cost = total_batch_tokens * cost_per_1k / 1000
+                    if budget_hit:
+                        st.error(f"🔴 Budget exceeded after {tasks_completed}/{int(batch_size)} tasks | {total_batch_tokens:,} tokens | ${batch_cost:.2f}")
+                    else:
+                        st.success(f"✓ Batch complete: {tasks_completed} tasks | {total_batch_tokens:,} tokens | ${batch_cost:.2f}")
                 st.rerun()
     else:
         st.info("Register agents first.")
