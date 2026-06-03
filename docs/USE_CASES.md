@@ -109,10 +109,49 @@ IPC1 -->|4. Commands Micro-Adjustments| Act1
 
 **How CascadeGuard Helps:** Detects cycles in constant time, enforces per-agent and global token budgets, and trips the circuit breaker before runaway costs accumulate.
 
+**Runaway Cascade Scenario:**
+```python
+from cascade_guard import CascadeEngine
+from cascade_guard.models import DelegationAction
+
+# Protect a $150/month budget (5M tokens at $0.03/1K)
+guard = CascadeEngine(
+    max_velocity=50.0,
+    depth_limit=10,
+    fanout_limit=20,
+    preservation_threshold=0.3,
+    dollar_budget=150.0,
+    cost_per_1k_tokens=0.03,
+)
+
+# Normal delegation chain — allowed
+guard.register_agent("orchestrator", model_id="gpt-4o")
+guard.register_agent("research_agent", model_id="gpt-4o", parent_id="orchestrator")
+guard.register_agent("data_fetch_agent", model_id="gpt-4o", parent_id="research_agent")
+
+# Worker chain that attempts a circular loop
+guard.register_agent("worker_a", model_id="gpt-4o", parent_id="orchestrator")
+guard.register_agent("worker_b", model_id="gpt-4o", parent_id="worker_a")
+guard.register_agent("worker_c", model_id="gpt-4o", parent_id="worker_b")
+
+# CRITICAL: Worker C tries to delegate back to Worker A
+# Without CascadeGuard: spins 500+ times, burns $375 in seconds
+# With CascadeGuard: blocked in <250μs, $0 wasted
+result = guard.attempt_delegation("worker_c", "worker_a", DelegationAction.DELEGATE)
+assert not result.allowed
+assert result.cycle_detected
+# → "Cycle detected: delegation worker_c → worker_a would create circular dependency"
+```
+
 **Cost Impact:**
 | Scenario | Without CascadeGuard (500 iterations) | With CascadeGuard (trips at 20) |
 |---|---|---|
 | 5 agents, $0.03/1K tokens | $375.00 | $15.00 |
+
+**Three-Layer Protection:**
+1. **Cycle detection** — Union-Find catches circular loops in O(α(N))
+2. **Per-agent budgets** — Individual agents halt when their allocation is consumed
+3. **Global budget ceiling** — System-wide halt when monthly cap is hit, regardless of which agent caused it
 
 ---
 
