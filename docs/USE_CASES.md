@@ -40,6 +40,67 @@ if not result.allowed:
 
 **Key Insight:** The software's information flow dynamics (laminar/turbulent/chaotic) mirror the physical aerodynamics. CascadeGuard's flow states aren't a metaphor — they're a structural isomorphism.
 
+**Architecture Diagram:**
+
+```mermaid
+graph TB
+
+%% Styling Definitions
+classDef aiLayer fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff;
+classDef hardwareLayer fill:#27272a,stroke:#a1a1aa,stroke-width:2px,color:#fff;
+classDef physicalLayer fill:#451a03,stroke:#ea580c,stroke-width:2px,color:#fff;
+classDef network fill:#064e3b,stroke:#10b981,stroke-width:1px,color:#fff;
+
+%% Management Layer (Agentic AI)
+subgraph Management_Layer [SCADA / Central Farm Level]
+direction TB
+A[Agentic AI Engine]:::aiLayer
+CG[Cascade-Guard Policy Monitor]:::aiLayer
+A <-->|Evaluates Flow Anomalies| CG
+end
+
+%% Network Layer
+subgraph Network_Fabric [Industrial Time-Sensitive Network / EtherCAT]
+TSN((Deterministic Mesh Network)):::network
+end
+
+%% Physical Layer (Turbine Hubs & Blades)
+subgraph Turbine_1 [Turbine Edge Node 01]
+direction LR
+
+%% Edge Compute Nodes (Hardened IPCs)
+subgraph Edge_Compute [Nacelle Control Cabinet]
+IPC1[Blade 1 IPC Controller <br/> Rule-Based / DMPC]:::hardwareLayer
+IPC2[Blade 2 IPC Controller <br/> Rule-Based / DMPC]:::hardwareLayer
+IPC3[Blade 3 IPC Controller <br/> Rule-Based / DMPC]:::hardwareLayer
+end
+
+%% Actuators and Sensors
+subgraph Physical_Hardware [Rotating Hub Components]
+S1[Fiber Optic Strain Gauges]:::physicalLayer
+Act1[Pitch Actuator Motor]:::physicalLayer
+end
+end
+
+%% Connections - Management to Edge
+A -->|1. Pushes Optimal Boundary Setpoints <br/> Minute-Level Latency| TSN
+TSN -->|Provides Telemetry & Logs| A
+
+%% Connections - TSN to Edge IPCs
+TSN <-->|Real-Time Network Sync| IPC1
+TSN <-->|Real-Time Network Sync| IPC2
+TSN <-->|Real-Time Network Sync| IPC3
+
+%% Peer-to-Peer Inter-Blade Connections (Microseconds)
+IPC1 <==>|2. Sub-ms P2P Calculation Loop <br/> Load Balancing| IPC2
+IPC2 <==>|2. Sub-ms P2P Calculation Loop <br/> Load Balancing| IPC3
+IPC3 <==>|2. Sub-ms P2P Calculation Loop <br/> Load Balancing| IPC1
+
+%% Local I/O Control Loop (Hardware Microseconds)
+S1 -->|3. Reads Raw Deflection Data| IPC1
+IPC1 -->|4. Commands Micro-Adjustments| Act1
+```
+
 ---
 
 ## 2. Multi-Agent AI Systems (Token Budget Protection)
