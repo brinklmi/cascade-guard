@@ -256,6 +256,7 @@ pytest tests/ -v
 
 ## Further Reading
 
+- [Use Cases](docs/USE_CASES.md) — Wind turbines, drone swarms, autonomous vehicles, microservices, and more
 - [Your Multi-Agent System Will Eat Itself in Constant Time](docs/Your-Multi-Agent-System-Will-Eat-Itself-In-Constant-Time.md) — Technical deep-dive article
 - [THEORY.md](THEORY.md) — Design philosophy and mathematical foundations
 
