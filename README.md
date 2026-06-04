@@ -214,11 +214,15 @@ stateDiagram-v2
 | Feature | Status |
 |---|---|
 | Cycle detection (Union-Find) | ✓ O(α(N)) with path compression |
-| Distribution-based impedance | ✓ 4-metric weighted formula |
+| Distribution-based impedance | ✓ 5-metric weighted formula (velocity, depth, fanout, concentration, token pressure) |
 | Circuit breaker (3 consecutive failures) | ✓ CLOSED → OPEN → HALF_OPEN |
-| Auto-recovery (heartbeat + state reconstruction) | ✓ Fail-cached mode |
-| Decision log (append-only, survives crashes) | ✓ JSON capsules |
-| Framework-agnostic | ✓ Works with any agent system |
+| **Durable execution** (crash recovery) | ✓ Fail-cached mode with automatic state reconstruction |
+| **Decision log replay** (lossless recovery) | ✓ Append-only capsules, full topology rebuild on restart |
+| **Watchdog** (self-healing) | ✓ Background thread detects unavailability, triggers auto-restart |
+| **Topology snapshots** (known-good state) | ✓ Periodic snapshots for fail-cached delegation checking |
+| Per-agent and global token budgets | ✓ System-wide monthly cap + individual agent limits |
+| Zero semantic overhead | ✓ No text parsing, no LLM inference, no prompt tokens consumed |
+| Framework-agnostic | ✓ Works with LangGraph, CrewAI, AutoGen, or custom frameworks |
 | Zero external dependencies beyond pydantic | ✓ Minimal attack surface |
 
 ---
