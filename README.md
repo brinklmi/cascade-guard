@@ -260,6 +260,7 @@ pytest tests/ -v
 
 ## Further Reading
 
+- [Cloud Agent Integration Matrix](docs/CLOUD_AGENT_INTEGRATION.md) — How CascadeGuard constrains AWS DevOps Agent and Azure SRE Agent
 - [Zero Semantic Overhead](docs/ZERO_SEMANTIC_OVERHEAD.md) — Speed proof, security proof, and why text-based attacks have zero surface area
 - [Technical Quick-Start Guide](docs/QUICKSTART.md) — Integrate CascadeGuard into your middleware in 5 minutes
 - [Impedance Formulas](docs/IMPEDANCE_FORMULAS.md) — Exact mathematics of κ_effective and the five degradation dimensions
