@@ -224,6 +224,11 @@ stateDiagram-v2
 | Zero semantic overhead | ✓ No text parsing, no LLM inference, no prompt tokens consumed |
 | Framework-agnostic | ✓ Works with LangGraph, CrewAI, AutoGen, or custom frameworks |
 | Zero external dependencies beyond pydantic | ✓ Minimal attack surface |
+| **MCP Proxy Middleware** | ✓ Full MCP server with 19 requirements, dual Python/Rust |
+| **VPC-Private Deployment** | ✓ CloudFormation + Terraform, PrivateLink, no public exposure |
+| **Per-Agent Velocity Throttling** | ✓ Independent noisy-neighbor isolation |
+| **mTLS + IAM Authentication** | ✓ Role-based namespace authorization |
+| **Graceful Shutdown** | ✓ Drain in-flight, persist state, /ready 503 |
 
 ---
 
@@ -254,7 +259,84 @@ See [THEORY.md](THEORY.md) for the design philosophy: why Union-Find over graph 
 pytest tests/ -v
 ```
 
-37 tests covering Union-Find operations, engine behavior, flow monitor thresholds, circuit breaker state machine, and auto-recovery.
+429 tests covering Union-Find operations, engine behavior, flow monitor thresholds, circuit breaker state machine, auto-recovery, and the full MCP Proxy Middleware suite (envelope parsing, velocity control, authentication, configuration, tool registry, decision logging, metrics, shutdown, and cross-implementation equivalence).
+
+---
+
+## MCP Proxy Middleware
+
+CascadeGuard ships with a Model Context Protocol proxy server that acts as a transparent interception layer between MCP-capable agents and target tool integrations. Every tool invocation passes through deterministic safety checks before reaching the target endpoint.
+
+### Key Features
+
+- **MCP Protocol Compliant** — tools/list + tools/call, stdio + HTTP/SSE transports
+- **Zero Semantic Overhead** — reads only integer envelope fields, never inspects payloads (~5μs parse)
+- **Per-Agent Velocity Throttling** — noisy neighbor isolation without global state pollution
+- **mTLS + IAM Authentication** — role-based namespace authorization
+- **Hot-Reload Configuration** — 5s detection, validated before apply, retains previous on failure
+- **Graceful Shutdown** — SIGTERM → drain in-flight → persist state → /ready 503
+- **Dual Implementation** — Python (production) + Rust (<100μs high-performance path)
+- **VPC-Private Deployment** — CloudFormation + Terraform templates, PrivateLink, no public exposure
+
+### MCP Proxy Quick Start
+
+```python
+from cascade_guard import CascadeEngine
+from cascade_guard.mcp_proxy import (
+    MCPProxyServer, AuthManager, EnvelopeParser,
+    AgentVelocityController, ToolRegistry, DecisionLog,
+    MetricsEmitter, ConfigManager, ShutdownManager,
+)
+
+# Initialize components
+engine = CascadeEngine(max_velocity=50.0, token_budget=1000000)
+server = MCPProxyServer(
+    engine=engine,
+    auth_manager=AuthManager(auth_mode="none"),
+    envelope_parser=EnvelopeParser(),
+    velocity_controller=AgentVelocityController(),
+    tool_registry=ToolRegistry(),
+    decision_log=DecisionLog(),
+    metrics=MetricsEmitter(),
+    config_manager=ConfigManager(),
+    shutdown_manager=ShutdownManager(),
+)
+```
+
+### MCP Proxy Architecture
+
+```
+MCP Client → [Auth] → [Envelope Parse] → [Velocity Check] → [CascadeEngine] → Target Server
+                                                                    │
+                                                              [Decision Log]
+                                                              [Metrics Emit]
+```
+
+### Deployment
+
+```bash
+# CloudFormation
+aws cloudformation deploy \
+  --template-file infra/cloudformation/mcp-proxy-stack.yaml \
+  --stack-name cascadeguard-proxy \
+  --parameter-overrides VpcId=vpc-xxx SubnetIds=subnet-a,subnet-b \
+    ContainerImage=123456789.dkr.ecr.us-east-1.amazonaws.com/cascadeguard:latest
+
+# Terraform
+cd infra/terraform
+terraform init
+terraform apply -var="vpc_id=vpc-xxx" -var="subnet_ids=[\"subnet-a\",\"subnet-b\"]" \
+  -var="container_image=123456789.dkr.ecr.us-east-1.amazonaws.com/cascadeguard:latest"
+```
+
+### Rust High-Performance Build
+
+```bash
+cd cascade_guard_rs
+cargo build --release
+cargo test           # 12 tests
+cargo bench          # Criterion benchmarks (<100μs target)
+```
 
 ---
 
