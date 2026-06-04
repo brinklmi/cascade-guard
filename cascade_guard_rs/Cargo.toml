@@ -1,0 +1,36 @@
+[package]
+name = "cascade-guard-rs"
+version = "0.1.0"
+edition = "2021"
+description = "CascadeGuard MCP Proxy - High-performance Rust implementation"
+license = "MIT"
+authors = ["Michael Brinkley"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Time handling
+chrono = "0.4"
+
+# Python bindings for cross-implementation testing
+pyo3 = { version = "0.21", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["pyo3"]
+
+[lib]
+name = "cascade_guard_rs"
+crate-type = ["lib", "cdylib"]
+
+[[bench]]
+name = "safety_check"
+harness = false
+
+[dev-dependencies]
+criterion = "0.5"

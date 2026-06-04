@@ -1,0 +1,353 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CascadeGuard MCP Proxy Middleware - VPC-Private Deployment
+  Deploys the MCP proxy as an ECS Fargate service behind a VPC PrivateLink endpoint.
+  No public internet exposure. All traffic stays within the configured VPC.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where the proxy will be deployed
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets for ECS tasks (minimum 2 for HA)
+
+  ContainerImage:
+    Type: String
+    Description: ECR image URI for the MCP proxy container
+    Default: '123456789012.dkr.ecr.us-east-1.amazonaws.com/cascadeguard-mcp-proxy:latest'
+
+  DesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Number of ECS tasks to run
+
+  CpuUnits:
+    Type: Number
+    Default: 2048
+    AllowedValues: [256, 512, 1024, 2048, 4096]
+    Description: CPU units for each task (1024 = 1 vCPU)
+
+  MemoryMB:
+    Type: Number
+    Default: 4096
+    AllowedValues: [512, 1024, 2048, 4096, 8192, 16384]
+    Description: Memory in MB for each task
+
+  ProxyPort:
+    Type: Number
+    Default: 8080
+    Description: Port the MCP proxy listens on
+
+  MaxVelocity:
+    Type: Number
+    Default: 50
+    Description: CascadeGuard max delegation velocity
+
+  DepthLimit:
+    Type: Number
+    Default: 10
+    Description: Maximum delegation chain depth
+
+  FanoutLimit:
+    Type: Number
+    Default: 20
+    Description: Maximum delegation fanout per agent
+
+  PreservationThreshold:
+    Type: String
+    Default: '0.3'
+    Description: Impedance threshold for preservation mode
+
+  TokenBudget:
+    Type: Number
+    Default: 1000000
+    Description: System-wide token budget
+
+  DrainTimeoutSeconds:
+    Type: Number
+    Default: 30
+    Description: Graceful shutdown drain timeout
+
+Resources:
+  # Security Group - Only allows traffic from within VPC
+  ProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: CascadeGuard MCP Proxy - VPC internal only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ProxyPort
+          ToPort: !Ref ProxyPort
+          CidrIp: !GetAtt VpcCidr.CidrBlock
+          Description: Allow inbound from VPC CIDR only
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS outbound for target servers
+      Tags:
+        - Key: Name
+          Value: cascadeguard-mcp-proxy-sg
+
+  # Custom resource to get VPC CIDR
+  VpcCidr:
+    Type: Custom::VpcCidr
+    Properties:
+      ServiceToken: !GetAtt VpcCidrFunction.Arn
+      VpcId: !Ref VpcId
+
+  VpcCidrFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt VpcCidrRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          def handler(event, context):
+            if event['RequestType'] == 'Delete':
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              return
+            ec2 = boto3.client('ec2')
+            resp = ec2.describe_vpcs(VpcIds=[event['ResourceProperties']['VpcId']])
+            cidr = resp['Vpcs'][0]['CidrBlock']
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, {'CidrBlock': cidr})
+
+  VpcCidrRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DescribeVpc
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ec2:DescribeVpcs
+                Resource: '*'
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: cascadeguard-mcp-proxy
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # IAM Role for ECS Task Execution
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:cascadeguard/*'
+
+  # IAM Role for ECS Task (runtime permissions)
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # CloudWatch Log Group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/cascadeguard-mcp-proxy
+      RetentionInDays: 30
+
+  # ECS Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: cascadeguard-mcp-proxy
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref CpuUnits
+      Memory: !Ref MemoryMB
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: mcp-proxy
+          Image: !Ref ContainerImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ProxyPort
+              Protocol: tcp
+          Environment:
+            - Name: CASCADEGUARD_TRANSPORT_PORT
+              Value: !Sub '${ProxyPort}'
+            - Name: CASCADEGUARD_TRANSPORT_TYPE
+              Value: sse
+            - Name: CASCADEGUARD_ENGINE_MAX_VELOCITY
+              Value: !Sub '${MaxVelocity}'
+            - Name: CASCADEGUARD_ENGINE_DEPTH_LIMIT
+              Value: !Sub '${DepthLimit}'
+            - Name: CASCADEGUARD_ENGINE_FANOUT_LIMIT
+              Value: !Sub '${FanoutLimit}'
+            - Name: CASCADEGUARD_ENGINE_PRESERVATION_THRESHOLD
+              Value: !Ref PreservationThreshold
+            - Name: CASCADEGUARD_ENGINE_TOKEN_BUDGET
+              Value: !Sub '${TokenBudget}'
+            - Name: CASCADEGUARD_SHUTDOWN_DRAIN_TIMEOUT
+              Value: !Sub '${DrainTimeoutSeconds}'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: proxy
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - !Sub 'curl -f http://localhost:${ProxyPort}/health || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 10
+          StopTimeout: !Ref DrainTimeoutSeconds
+
+  # Network Load Balancer (internal)
+  NLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: cascadeguard-proxy-nlb
+      Scheme: internal
+      Type: network
+      Subnets: !Ref SubnetIds
+
+  # Target Group
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: cascadeguard-proxy-tg
+      Port: !Ref ProxyPort
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /health
+      HealthCheckPort: !Sub '${ProxyPort}'
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  # NLB Listener
+  NLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref NLB
+      Port: !Ref ProxyPort
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: NLBListener
+    Properties:
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref ProxySecurityGroup
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - ContainerName: mcp-proxy
+          ContainerPort: !Ref ProxyPort
+          TargetGroupArn: !Ref TargetGroup
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      HealthCheckGracePeriodSeconds: 30
+
+  # VPC Endpoint Service (PrivateLink)
+  VPCEndpointService:
+    Type: AWS::EC2::VPCEndpointService
+    Properties:
+      NetworkLoadBalancerArns:
+        - !Ref NLB
+      AcceptanceRequired: true
+
+Outputs:
+  ClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt ECSCluster.Arn
+
+  ServiceName:
+    Description: ECS Service Name
+    Value: !GetAtt ECSService.Name
+
+  NLBDnsName:
+    Description: Internal NLB DNS name
+    Value: !GetAtt NLB.DNSName
+
+  VPCEndpointServiceId:
+    Description: VPC Endpoint Service ID for PrivateLink consumers
+    Value: !Ref VPCEndpointService
+
+  SecurityGroupId:
+    Description: Proxy security group ID
+    Value: !Ref ProxySecurityGroup
+
+  LogGroupName:
+    Description: CloudWatch Log Group
+    Value: !Ref LogGroup
