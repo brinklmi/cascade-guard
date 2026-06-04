@@ -256,6 +256,8 @@ pytest tests/ -v
 
 ## Further Reading
 
+- [Technical Quick-Start Guide](docs/QUICKSTART.md) — Integrate CascadeGuard into your middleware in 5 minutes
+- [Impedance Formulas](docs/IMPEDANCE_FORMULAS.md) — Exact mathematics of κ_effective and the five degradation dimensions
 - [Use Cases](docs/USE_CASES.md) — Wind turbines, drone swarms, autonomous vehicles, microservices, and more
 - [Your Multi-Agent System Will Eat Itself in Constant Time](docs/Your-Multi-Agent-System-Will-Eat-Itself-In-Constant-Time.md) — Technical deep-dive article
 - [THEORY.md](THEORY.md) — Design philosophy and mathematical foundations
