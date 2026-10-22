@@ -98,7 +98,11 @@ state_colors = {
     "throttled": "🟠",
     "preservation": "🔴",
 }
-st.sidebar.markdown(f"**Flow State:** {state_colors.get(flow_state, '⚪')} {flow_state.upper()}")
+budget_exhausted = bool(status.total_token_budget) and status.token_budget_utilization >= 1.0
+if budget_exhausted:
+    st.sidebar.markdown("**Flow State:** 🔴 BUDGET EXHAUSTED")
+else:
+    st.sidebar.markdown(f"**Flow State:** {state_colors.get(flow_state, '⚪')} {flow_state.upper()}")
 st.sidebar.markdown(f"**κ_effective:** {status.kappa_effective:.3f}")
 st.sidebar.markdown(f"**Agents:** {status.total_agents}")
 st.sidebar.markdown(f"**Delegations:** {status.total_delegations}")
@@ -299,7 +303,7 @@ with metric_col1:
               delta=f"{status.kappa_effective - 1.0:.3f}" if status.kappa_effective < 1.0 else None)
 
 with metric_col2:
-    st.metric("Flow State", flow_state.upper())
+    st.metric("Flow State", "BUDGET EXHAUSTED" if budget_exhausted else flow_state.upper())
 
 with metric_col3:
     st.metric("Cycles Detected", status.cycles_detected)
@@ -321,7 +325,7 @@ with token_col3:
     st.metric("Budget Used", f"{status.token_budget_utilization*100:.1f}%")
 
 with token_col4:
-    cost = status.total_tokens_consumed * 0.03 / 1000
+    cost = status.total_tokens_consumed * cost_per_1k / 1000
     st.metric("Total Cost", f"${cost:.2f}")
 
 
